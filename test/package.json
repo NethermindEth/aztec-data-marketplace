@@ -1,0 +1,31 @@
+{
+  "name": "data-marketplace-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "rm -rf store/pxe && NODE_NO_WARNINGS=1 node --experimental-vm-modules $(which jest || echo ./node_modules/.bin/jest) --no-cache --runInBand",
+    "test:e2e": "rm -rf store/pxe && NODE_NO_WARNINGS=1 node --experimental-vm-modules $(which jest || echo ./node_modules/.bin/jest) --no-cache --runInBand --testPathPattern=e2e"
+    },
+  "dependencies": {
+    "@aztec/accounts": "4.1.0-rc.2",
+    "@aztec/aztec.js": "4.1.0-rc.2",
+    "@aztec/constants": "4.1.0-rc.2",
+    "@aztec/entrypoints": "4.1.0-rc.2",
+    "@aztec/foundation": "4.1.0-rc.2",
+    "@aztec/noir-contracts.js": "4.1.0-rc.2",
+    "@aztec/protocol-contracts": "4.1.0-rc.2",
+    "@aztec/pxe": "4.1.0-rc.2",
+    "@aztec/stdlib": "4.1.0-rc.2",
+    "@aztec/wallet-sdk": "4.1.0-rc.2",
+    "@aztec/wallets": "4.1.0-rc.2"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.13",
+    "@types/node": "^22.5.4",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.2"
+  }
+}

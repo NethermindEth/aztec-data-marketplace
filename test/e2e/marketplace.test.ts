@@ -1,0 +1,194 @@
+import { describe, it, expect, beforeAll, afterAll } from "@jest/globals";
+import { createAztecNodeClient } from "@aztec/aztec.js/node";
+import { Fr } from "@aztec/aztec.js/fields";
+import { AztecAddress } from "@aztec/aztec.js/addresses";
+import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee";
+import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts";
+import { AccountManager } from "@aztec/aztec.js/wallet";
+import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin";
+import { createLogger } from "@aztec/foundation/log";
+import { SPONSORED_FPC_SALT } from "@aztec/constants";
+import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC";
+import { TokenContract } from "@aztec/noir-contracts.js/Token";
+import { EmbeddedWallet } from "@aztec/wallets/embedded";
+import { TxStatus } from "@aztec/stdlib/tx";
+import { MarketplaceContract } from "../artifacts/Marketplace.js";
+import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/poseidon";
+
+const NODE_URL = process.env.AZTEC_NODE_URL || "http://localhost:8080";
+const DEPLOY_TIMEOUT = 120_000;
+const TX_TIMEOUT = 60_000;
+const DOM_SEP_FUNCTION_ARGS = 3576554347;
+
+const logger = createLogger("e2e:marketplace");
+
+const DATA_0 = new Fr(1n);
+const DATA_1 = new Fr(68n);
+const DATA_2 = new Fr(1710000000n);
+const DATA_3 = new Fr(1n);
+const BAD_DATA_1 = new Fr(999n);
+const CATEGORY = new Fr(1n);
+const PRICE = new Fr(100n);
+const PRICE_2 = new Fr(200n);
+const P = "";
+
+async function getSponsoredFPCInstance() {
+  return await getContractInstanceFromInstantiationParams(
+    SponsoredFPCContractArtifact,
+    { salt: new Fr(SPONSORED_FPC_SALT) }
+  );
+}
+
+describe("Data Marketplace E2E", () => {
+  let wallet: EmbeddedWallet;
+  let sponsoredPaymentMethod: SponsoredFeePaymentMethod;
+  let sellerAccount: AccountManager;
+  let buyerAccount: AccountManager;
+  let token: TokenContract;
+  let marketplace: MarketplaceContract;
+
+  beforeAll(async () => {
+    const node = createAztecNodeClient(NODE_URL);
+    wallet = await EmbeddedWallet.create(node, { ephemeral: true });
+
+    const sponsoredFPC = await getSponsoredFPCInstance();
+    await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
+    sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
+
+    sellerAccount = await wallet.createSchnorrAccount(Fr.random(), Fr.random(), GrumpkinScalar.random());
+    await (await sellerAccount.getDeployMethod()).send({
+      from: AztecAddress.ZERO,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: DEPLOY_TIMEOUT },
+    });
+    logger.info(`Seller deployed: ${sellerAccount.address}`);
+
+    buyerAccount = await wallet.createSchnorrAccount(Fr.random(), Fr.random(), GrumpkinScalar.random());
+    await (await buyerAccount.getDeployMethod()).send({
+      from: AztecAddress.ZERO,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: DEPLOY_TIMEOUT },
+    });
+    logger.info(`Buyer deployed: ${buyerAccount.address}`);
+
+    await wallet.registerSender(sellerAccount.address, "seller");
+    await wallet.registerSender(buyerAccount.address, "buyer");
+
+    const tokenDeploy = TokenContract.deploy(wallet, sellerAccount.address, "TestToken", "TST", 18);
+    await tokenDeploy.simulate({ from: sellerAccount.address });
+    const { contract: token_ } = await tokenDeploy.send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: DEPLOY_TIMEOUT },
+    });
+    token = token_;
+    logger.info(`Token deployed at ${token.address}`);
+
+    await token.methods.mint_to_public(buyerAccount.address, 10_000n).simulate({ from: sellerAccount.address });
+    await token.methods.mint_to_public(buyerAccount.address, 10_000n).send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
+
+    await token.methods.transfer_to_private(buyerAccount.address, 10_000n).simulate({ from: buyerAccount.address });
+    await token.methods.transfer_to_private(buyerAccount.address, 10_000n).send({
+      from: buyerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
+    logger.info("Buyer has 10,000 tokens in private balance");
+
+    const marketplaceDeploy = MarketplaceContract.deploy(wallet, sellerAccount.address);
+    await marketplaceDeploy.simulate({ from: sellerAccount.address });
+    const { contract: marketplace_ } = await marketplaceDeploy.send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: DEPLOY_TIMEOUT },
+    });
+    marketplace = marketplace_;
+    logger.info(`Marketplace deployed at ${marketplace.address}`);
+  }, 600_000);
+
+  afterAll(async () => {
+    await wallet?.stop();
+  });
+
+  it("happy path: list, lock payment, deliver and claim", async () => {
+    const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
+    const contentHash = new Fr(contentHashRaw.toBigInt());
+
+    await (marketplace.methods as any)[`${P}create_listing`](contentHash, PRICE, token.address, CATEGORY).send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
+
+    const listingId = new Fr(1n);
+    const listing = await (marketplace.methods as any)[`${P}get_listing`](listingId).simulate({ from: sellerAccount.address });
+    expect(listing.result.active).toBe(true);
+
+    const lockAction = token.methods.transfer_to_public(buyerAccount.address, marketplace.address, 100n, 0);
+    const authWit = await wallet.createAuthWit(buyerAccount.address, { caller: marketplace.address, action: lockAction });
+    const deadline = new Fr(1200n);
+
+    await (marketplace.methods as any)[`${P}lock_payment`](
+      listingId, sellerAccount.address, PRICE, token.address, deadline
+    ).with({ authWitnesses: [authWit] }).send({
+      from: buyerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
+    logger.info("Payment locked");
+
+    await (marketplace.methods as any)[`${P}deliver_and_claim`](
+      listingId, buyerAccount.address, DATA_0, DATA_1, DATA_2, DATA_3
+    ).send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
+    logger.info("Delivered and claimed");
+
+    const listingAfter = await (marketplace.methods as any)[`${P}get_listing`](listingId).simulate({ from: sellerAccount.address });
+    expect(listingAfter.result.active).toBe(false);
+  }, 600_000);
+
+  it("should reject delivery of wrong data", async () => {
+    const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
+    const contentHash = new Fr(contentHashRaw.toBigInt());
+
+    await (marketplace.methods as any)[`${P}create_listing`](contentHash, PRICE_2, token.address, CATEGORY).send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
+
+    const nextId = await (marketplace.methods as any)[`${P}get_next_listing_id`]().simulate({ from: sellerAccount.address });
+    const listingId = new Fr(BigInt(nextId.result) - 1n);
+
+    const lockAction = token.methods.transfer_to_public(buyerAccount.address, marketplace.address, 200n, 0);
+    const authWit = await wallet.createAuthWit(buyerAccount.address, { caller: marketplace.address, action: lockAction });
+    const deadline = new Fr(1200n);
+
+    await (marketplace.methods as any)[`${P}lock_payment`](
+      listingId, sellerAccount.address, PRICE_2, token.address, deadline
+    ).with({ authWitnesses: [authWit] }).send({
+      from: buyerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
+
+    await expect(
+      (marketplace.methods as any)[`${P}deliver_and_claim`](
+        listingId, buyerAccount.address, DATA_0, BAD_DATA_1, DATA_2, DATA_3
+      ).send({
+        from: sellerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      })
+    ).rejects.toThrow();
+
+    logger.info("Wrong data rejection test passed");
+  }, 600_000);
+});

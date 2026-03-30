@@ -1,18 +1,10 @@
-// Data Marketplace Contract - Phase 1 POC
-//
-// Combined marketplace + escrow contract for the personal data marketplace.
-// Handles: listing creation, payment escrow, data delivery, and timeout refunds.
-//
-// Architecture:
-//   - Listings are registered in a public index (visible metadata, no seller identity).
-//   - Escrow notes are private, owned by the seller (so seller's PXE discovers them).
-//   - Data notes are private, delivered to the buyer on purchase.
-//   - Payment uses authwit flow against an external token contract (TODO).
+// Data Marketplace Contract - Phase 1 POC (v3, public escrow)
 
 use aztec::macros::aztec;
 
 pub mod escrow_note;
 pub mod data_note;
+pub mod listing_note;
 
 #[aztec]
 pub contract Marketplace {
@@ -36,48 +28,29 @@ pub contract Marketplace {
     use aztec::hash::hash_args;
     use crate::escrow_note::EscrowNote;
     use crate::data_note::DataNote;
+    use crate::listing_note::ListingNote;
     use token::Token;
 
-    // ---------------------------------------------------------------
-    // Storage
-    // ---------------------------------------------------------------
+    global MIN_DEADLINE_BLOCKS: u32 = 100;
 
-    // Public listing entry stored in the public index.
-    // Kept minimal: just enough for browsing.
-    // Seller identity is NOT stored here.
     #[derive(Packable)]
     pub struct ListingEntry {
-        content_hash: Field,     // hash of the data committed at listing time
-        price: Field,            // price in token base units
-        token: AztecAddress,     // payment token address
-        category: Field,         // data category (e.g. 1 = health/wearable)
-        active: bool,            // whether the listing is available
+        content_hash: Field,
+        price: Field,
+        token: AztecAddress,
+        category: Field,
+        active: bool,
     }
 
     #[storage]
     struct Storage<Context> {
-        // Admin who can manage the contract (for POC, deployer)
         admin: PublicMutable<AztecAddress, Context>,
-
-        // Public listing index: listing_id -> ListingEntry
         listings: Map<Field, PublicMutable<ListingEntry, Context>, Context>,
-
-        // Counter for generating listing IDs
         next_listing_id: PublicMutable<Field, Context>,
-
-        // Private escrow notes, owned by the seller.
-        // When a buyer locks payment, an EscrowNote is created for the seller.
-        // The seller nullifies it during delivery.
+        listing_notes: Owned<PrivateSet<ListingNote, Context>, Context>,
         escrows: Owned<PrivateSet<EscrowNote, Context>, Context>,
-
-        // Private data notes, owned by the buyer.
-        // Created during delivery with the actual data payload.
         data_notes: Owned<PrivateSet<DataNote, Context>, Context>,
     }
-
-    // ---------------------------------------------------------------
-    // Constructor
-    // ---------------------------------------------------------------
 
     #[external("public")]
     #[initializer]
@@ -87,16 +60,8 @@ pub contract Marketplace {
     }
 
     // ---------------------------------------------------------------
-    // Create Listing
+    // Create Listing (Seller)
     // ---------------------------------------------------------------
-    // Phase 1: simplified listing - no attestation check yet (Phase 2).
-    // Seller commits a content_hash and registers metadata publicly.
-    //
-    // Flow:
-    //   1. Private: seller provides content_hash, price, token, category.
-    //   2. Private function enqueues a public call to register in the index.
-    //
-    // NOTE: In Phase 2 we add attestation verification here.
 
     #[external("private")]
     fn create_listing(
@@ -105,9 +70,17 @@ pub contract Marketplace {
         token: AztecAddress,
         category: Field,
     ) {
-        // For now, just register the listing publicly.
-        // The seller's identity is NOT included in the public call.
-        self.enqueue_self._register_listing(content_hash, price, token, category);
+        let seller = self.msg_sender();
+
+        let listing = ListingNote {
+            listing_id: 0,
+            content_hash,
+        };
+        self.storage.listing_notes.at(seller)
+            .insert(listing)
+            .deliver(MessageDelivery.ONCHAIN_UNCONSTRAINED);
+
+        self.enqueue(Marketplace::at(self.context.this_address())._register_listing(content_hash, price, token, category));
     }
 
     #[external("public")]
@@ -134,19 +107,8 @@ pub contract Marketplace {
     // ---------------------------------------------------------------
     // Lock Payment (Buyer)
     // ---------------------------------------------------------------
-    // Buyer locks payment for a listing. Creates an EscrowNote for the seller.
-    //
-    // Flow:
-    //   1. Buyer calls lock_payment with the listing_id and seller address.
-    //   2. The contract uses authwit to transfer tokens from buyer to this contract.
-    //   3. An EscrowNote is created in the seller's private set.
-    //
-    // The seller address must be known to the buyer (shared off-chain or via
-    // a separate discovery mechanism). This is a deliberate design choice:
-    // the public listing index does NOT reveal the seller's address.
-    //
-    // TODO: Wire up token transfer via authwit. For now, caller must have
-    // pre-transferred tokens to this contract.
+    // Moves buyer's private tokens into the contract's public balance
+    // via transfer_to_public, then creates an EscrowNote for the seller.
 
     #[external("private")]
     fn lock_payment(
@@ -158,12 +120,9 @@ pub contract Marketplace {
     ) {
         let buyer = self.msg_sender();
 
-        // Transfer tokens from buyer to this contract via authwit.
-        // The buyer must have previously created an authwit allowing this contract
-        // to call transfer_in_private on the token contract on their behalf.
-        self.call(Token::at(token).transfer_in_private(buyer, self.address, amount as u128, 0));
+        // Private-to-public: buyer's private balance -> contract's public balance.
+        self.call(Token::at(token).transfer_to_public(buyer, self.address, amount as u128, 0));
 
-        // Create the escrow note for the seller.
         let escrow = EscrowNote {
             listing_id,
             buyer,
@@ -172,61 +131,64 @@ pub contract Marketplace {
             deadline,
         };
 
-        // Insert into seller's private set and deliver so seller's PXE finds it.
-        // UNCONSTRAINED_ONCHAIN: seller is incentivised to find the note (they
-        // want to claim payment), so constrained delivery is not needed here.
+        self.enqueue_self._check_min_deadline(deadline);
+
         self.storage.escrows.at(seller)
             .insert(escrow)
             .deliver(MessageDelivery.ONCHAIN_UNCONSTRAINED);
     }
 
+    #[external("public")]
+    #[only_self]
+    fn _check_min_deadline(deadline: Field) {
+        let current_block = self.context.block_number();
+        assert(
+            deadline as u32 >= current_block + MIN_DEADLINE_BLOCKS,
+            "Deadline too soon -- must be at least MIN_DEADLINE_BLOCKS in the future"
+        );
+    }
+
     // ---------------------------------------------------------------
     // Deliver and Claim (Seller)
     // ---------------------------------------------------------------
-    // Seller delivers data to the buyer and atomically claims the escrowed payment.
-    //
-    // Flow:
-    //   1. Seller provides the escrow's listing_id to find the right EscrowNote.
-    //   2. The contract verifies the content_hash matches.
-    //   3. A DataNote is created for the buyer with the actual data.
-    //   4. The EscrowNote is nullified (consumed).
-    //   5. Payment is released to the seller.
-    //
-    // Steps 3-5 are all side effects of a single transaction.
-    // If any step fails, the entire transaction reverts.
+    // Consumes the ListingNote and EscrowNote, creates a DataNote for
+    // the buyer, and enqueues a public transfer to release payment.
 
     #[external("private")]
     fn deliver_and_claim(
         listing_id: Field,
         buyer: AztecAddress,
-        content_hash: Field,
         data_0: Field,
         data_1: Field,
         data_2: Field,
         data_3: Field,
     ) {
-        let _seller = self.msg_sender();
+        let seller = self.msg_sender();
 
-        // 1. Verify the data matches the committed content hash.
-        //    The content hash is hash(data_0, data_1, data_2, data_3).
         let computed_hash = hash_args([data_0, data_1, data_2, data_3]);
-        assert(computed_hash == content_hash, "Content hash mismatch: data does not match commitment");
 
-        // 2. Find and consume the EscrowNote for this listing + buyer.
-        let options = NoteGetterOptions::<EscrowNote, 5, Field, Field>::new()
+        let listing_options = NoteGetterOptions::<ListingNote, 2, Field, Field>::new()
+            .select(ListingNote::properties().content_hash, Comparator.EQ, computed_hash)
+            .set_limit(1);
+
+        let listing_notes = self.storage.listing_notes.at(seller).pop_notes(listing_options);
+        assert(listing_notes.len() == 1, "No matching listing note found");
+
+        let committed_hash = listing_notes.get(0).content_hash;
+
+        let escrow_options = NoteGetterOptions::<EscrowNote, 5, Field, Field>::new()
             .select(EscrowNote::properties().listing_id, Comparator.EQ, listing_id)
             .select(EscrowNote::properties().buyer, Comparator.EQ, buyer.to_field())
             .set_limit(1);
 
-        let notes = self.storage.escrows.at(_seller).pop_notes(options);
-        assert(notes.len() == 1, "No matching escrow note found");
+        let escrow_notes = self.storage.escrows.at(seller).pop_notes(escrow_options);
+        assert(escrow_notes.len() == 1, "No matching escrow note found");
 
-        let escrow = notes.get(0);
+        let escrow = escrow_notes.get(0);
 
-        // 3. Create the DataNote for the buyer.
         let data = DataNote {
             listing_id,
-            content_hash,
+            content_hash: committed_hash,
             data_0,
             data_1,
             data_2,
@@ -237,11 +199,9 @@ pub contract Marketplace {
             .insert(data)
             .deliver(MessageDelivery.ONCHAIN_UNCONSTRAINED);
 
-        // 4. Release payment to the seller.
-        // Transfer escrowed tokens from this contract to the seller.
-        self.call(Token::at(escrow.token).transfer_in_private(self.address, _seller, escrow.amount as u128, 0));
+        // Public transfer: contract's public balance -> seller's public balance.
+        self.enqueue(Token::at(escrow.token).transfer_in_public(self.context.this_address(), seller, escrow.amount as u128, 0));
 
-        // 5. Mark listing as inactive (prevents double-sell).
         self.enqueue_self._deactivate_listing(listing_id);
     }
 
@@ -256,14 +216,13 @@ pub contract Marketplace {
     // ---------------------------------------------------------------
     // Refund (Buyer)
     // ---------------------------------------------------------------
-    // Buyer reclaims payment if the seller never delivers.
-    // Can only be called after the deadline block has passed.
+    // Consumes the EscrowNote, checks the deadline has passed, and
+    // enqueues a public transfer back to the buyer.
 
     #[external("private")]
     fn refund(listing_id: Field, seller: AztecAddress) {
         let buyer = self.msg_sender();
 
-        // Find the escrow note.
         let options = NoteGetterOptions::<EscrowNote, 5, Field, Field>::new()
             .select(EscrowNote::properties().listing_id, Comparator.EQ, listing_id)
             .select(EscrowNote::properties().buyer, Comparator.EQ, buyer.to_field())
@@ -274,14 +233,21 @@ pub contract Marketplace {
 
         let escrow = notes.get(0);
 
-        // TODO: Check deadline has passed. This needs an enqueued public check.
+        self.enqueue_self._check_deadline(escrow.deadline);
 
-        // Transfer escrowed tokens back to the buyer.
-        self.call(Token::at(escrow.token).transfer_in_private(self.address, buyer, escrow.amount as u128, 0));
+        // Public transfer: contract's public balance -> buyer's public balance.
+        self.enqueue(Token::at(escrow.token).transfer_in_public(self.context.this_address(), buyer, escrow.amount as u128, 0));
+    }
+
+    #[external("public")]
+    #[only_self]
+    fn _check_deadline(deadline: Field) {
+        let current_block = self.context.block_number();
+        assert(current_block >= deadline as u32, "Deadline has not passed -- refund not yet available");
     }
 
     // ---------------------------------------------------------------
-    // Utility (view) functions
+    // Utility
     // ---------------------------------------------------------------
 
     #[external("utility")]
