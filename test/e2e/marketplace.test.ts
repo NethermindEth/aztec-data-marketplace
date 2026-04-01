@@ -13,6 +13,7 @@ import { TokenContract } from "@aztec/noir-contracts.js/Token";
 import { EmbeddedWallet } from "@aztec/wallets/embedded";
 import { TxStatus } from "@aztec/stdlib/tx";
 import { MarketplaceContract } from "../artifacts/Marketplace.js";
+import { AttestorRegistryContract } from "../artifacts/AttestorRegistry.js";
 import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/poseidon";
 
 const NODE_URL = process.env.AZTEC_NODE_URL || "http://localhost:8080";
@@ -30,7 +31,11 @@ const BAD_DATA_1 = new Fr(999n);
 const CATEGORY = new Fr(1n);
 const PRICE = new Fr(100n);
 const PRICE_2 = new Fr(200n);
-const P = "";
+
+// Test attestor key (placeholder values for POC)
+const ATTESTOR_KEY_X = new Fr(12345n);
+const ATTESTOR_KEY_Y = new Fr(67890n);
+const ATTESTOR_TYPE_APP_ATTEST = new Fr(1n);
 
 async function getSponsoredFPCInstance() {
   return await getContractInstanceFromInstantiationParams(
@@ -46,6 +51,8 @@ describe("Data Marketplace E2E", () => {
   let buyerAccount: AccountManager;
   let token: TokenContract;
   let marketplace: MarketplaceContract;
+  let registry: AttestorRegistryContract;
+  let attestorId: Fr;
 
   beforeAll(async () => {
     const node = createAztecNodeClient(NODE_URL);
@@ -74,6 +81,7 @@ describe("Data Marketplace E2E", () => {
     await wallet.registerSender(sellerAccount.address, "seller");
     await wallet.registerSender(buyerAccount.address, "buyer");
 
+    // Deploy Token
     const tokenDeploy = TokenContract.deploy(wallet, sellerAccount.address, "TestToken", "TST", 18);
     await tokenDeploy.simulate({ from: sellerAccount.address });
     const { contract: token_ } = await tokenDeploy.send({
@@ -84,6 +92,7 @@ describe("Data Marketplace E2E", () => {
     token = token_;
     logger.info(`Token deployed at ${token.address}`);
 
+    // Mint and transfer tokens to buyer's private balance
     await token.methods.mint_to_public(buyerAccount.address, 10_000n).simulate({ from: sellerAccount.address });
     await token.methods.mint_to_public(buyerAccount.address, 10_000n).send({
       from: sellerAccount.address,
@@ -99,7 +108,31 @@ describe("Data Marketplace E2E", () => {
     });
     logger.info("Buyer has 10,000 tokens in private balance");
 
-    const marketplaceDeploy = MarketplaceContract.deploy(wallet, sellerAccount.address);
+    // Deploy AttestorRegistry
+    const registryDeploy = AttestorRegistryContract.deploy(wallet, sellerAccount.address);
+    await registryDeploy.simulate({ from: sellerAccount.address });
+    const { contract: registry_ } = await registryDeploy.send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: DEPLOY_TIMEOUT },
+    });
+    registry = registry_;
+    logger.info(`AttestorRegistry deployed at ${registry.address}`);
+
+    // Register a test attestor
+    await registry.methods.register_attestor(ATTESTOR_KEY_X, ATTESTOR_KEY_Y, ATTESTOR_TYPE_APP_ATTEST)
+      .simulate({ from: sellerAccount.address });
+    await registry.methods.register_attestor(ATTESTOR_KEY_X, ATTESTOR_KEY_Y, ATTESTOR_TYPE_APP_ATTEST)
+      .send({
+        from: sellerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      });
+    attestorId = new Fr(1n);
+    logger.info("Test attestor registered");
+
+    // Deploy Marketplace with registry address
+    const marketplaceDeploy = MarketplaceContract.deploy(wallet, sellerAccount.address, registry.address);
     await marketplaceDeploy.simulate({ from: sellerAccount.address });
     const { contract: marketplace_ } = await marketplaceDeploy.send({
       from: sellerAccount.address,
@@ -118,39 +151,48 @@ describe("Data Marketplace E2E", () => {
     const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
     const contentHash = new Fr(contentHashRaw.toBigInt());
 
-    await (marketplace.methods as any)[`${P}create_listing`](contentHash, PRICE, token.address, CATEGORY).send({
-      from: sellerAccount.address,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-      wait: { timeout: TX_TIMEOUT },
-    });
+    // create_listing now requires attestor_id and registry_address
+    await marketplace.methods.create_listing(contentHash, PRICE, token.address, CATEGORY, attestorId, registry.address)
+      .simulate({ from: sellerAccount.address });
+    await marketplace.methods.create_listing(contentHash, PRICE, token.address, CATEGORY, attestorId, registry.address)
+      .send({
+        from: sellerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      });
 
     const listingId = new Fr(1n);
-    const listing = await (marketplace.methods as any)[`${P}get_listing`](listingId).simulate({ from: sellerAccount.address });
+    const listing = await marketplace.methods.get_listing(listingId).simulate({ from: sellerAccount.address });
     expect(listing.result.active).toBe(true);
+    expect(BigInt(listing.result.attestor_id)).toBe(1n);
 
     const lockAction = token.methods.transfer_to_public(buyerAccount.address, marketplace.address, 100n, 0);
     const authWit = await wallet.createAuthWit(buyerAccount.address, { caller: marketplace.address, action: lockAction });
     const deadline = new Fr(1200n);
 
-    await (marketplace.methods as any)[`${P}lock_payment`](
-      listingId, sellerAccount.address, PRICE, token.address, deadline
-    ).with({ authWitnesses: [authWit] }).send({
-      from: buyerAccount.address,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-      wait: { timeout: TX_TIMEOUT },
-    });
+    await marketplace.methods.lock_payment(listingId, sellerAccount.address, PRICE, token.address, deadline)
+      .with({ authWitnesses: [authWit] })
+      .simulate({ from: buyerAccount.address });
+    await marketplace.methods.lock_payment(listingId, sellerAccount.address, PRICE, token.address, deadline)
+      .with({ authWitnesses: [authWit] })
+      .send({
+        from: buyerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      });
     logger.info("Payment locked");
 
-    await (marketplace.methods as any)[`${P}deliver_and_claim`](
-      listingId, buyerAccount.address, DATA_0, DATA_1, DATA_2, DATA_3
-    ).send({
-      from: sellerAccount.address,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-      wait: { timeout: TX_TIMEOUT },
-    });
+    await marketplace.methods.deliver_and_claim(listingId, buyerAccount.address, DATA_0, DATA_1, DATA_2, DATA_3)
+      .simulate({ from: sellerAccount.address });
+    await marketplace.methods.deliver_and_claim(listingId, buyerAccount.address, DATA_0, DATA_1, DATA_2, DATA_3)
+      .send({
+        from: sellerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      });
     logger.info("Delivered and claimed");
 
-    const listingAfter = await (marketplace.methods as any)[`${P}get_listing`](listingId).simulate({ from: sellerAccount.address });
+    const listingAfter = await marketplace.methods.get_listing(listingId).simulate({ from: sellerAccount.address });
     expect(listingAfter.result.active).toBe(false);
   }, 600_000);
 
@@ -158,37 +200,60 @@ describe("Data Marketplace E2E", () => {
     const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
     const contentHash = new Fr(contentHashRaw.toBigInt());
 
-    await (marketplace.methods as any)[`${P}create_listing`](contentHash, PRICE_2, token.address, CATEGORY).send({
-      from: sellerAccount.address,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-      wait: { timeout: TX_TIMEOUT },
-    });
+    await marketplace.methods.create_listing(contentHash, PRICE_2, token.address, CATEGORY, attestorId, registry.address)
+      .simulate({ from: sellerAccount.address });
+    await marketplace.methods.create_listing(contentHash, PRICE_2, token.address, CATEGORY, attestorId, registry.address)
+      .send({
+        from: sellerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      });
 
-    const nextId = await (marketplace.methods as any)[`${P}get_next_listing_id`]().simulate({ from: sellerAccount.address });
+    const nextId = await marketplace.methods.get_next_listing_id().simulate({ from: sellerAccount.address });
     const listingId = new Fr(BigInt(nextId.result) - 1n);
 
     const lockAction = token.methods.transfer_to_public(buyerAccount.address, marketplace.address, 200n, 0);
     const authWit = await wallet.createAuthWit(buyerAccount.address, { caller: marketplace.address, action: lockAction });
     const deadline = new Fr(1200n);
 
-    await (marketplace.methods as any)[`${P}lock_payment`](
-      listingId, sellerAccount.address, PRICE_2, token.address, deadline
-    ).with({ authWitnesses: [authWit] }).send({
-      from: buyerAccount.address,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-      wait: { timeout: TX_TIMEOUT },
-    });
-
-    await expect(
-      (marketplace.methods as any)[`${P}deliver_and_claim`](
-        listingId, buyerAccount.address, DATA_0, BAD_DATA_1, DATA_2, DATA_3
-      ).send({
-        from: sellerAccount.address,
+    await marketplace.methods.lock_payment(listingId, sellerAccount.address, PRICE_2, token.address, deadline)
+      .with({ authWitnesses: [authWit] })
+      .simulate({ from: buyerAccount.address });
+    await marketplace.methods.lock_payment(listingId, sellerAccount.address, PRICE_2, token.address, deadline)
+      .with({ authWitnesses: [authWit] })
+      .send({
+        from: buyerAccount.address,
         fee: { paymentMethod: sponsoredPaymentMethod },
         wait: { timeout: TX_TIMEOUT },
-      })
+      });
+
+    await expect(
+      marketplace.methods.deliver_and_claim(listingId, buyerAccount.address, DATA_0, BAD_DATA_1, DATA_2, DATA_3)
+        .send({
+          from: sellerAccount.address,
+          fee: { paymentMethod: sponsoredPaymentMethod },
+          wait: { timeout: TX_TIMEOUT },
+        })
     ).rejects.toThrow();
 
     logger.info("Wrong data rejection test passed");
+  }, 600_000);
+
+  it("should reject listing with invalid attestor", async () => {
+    const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
+    const contentHash = new Fr(contentHashRaw.toBigInt());
+
+    const fakeAttestorId = new Fr(999n);
+
+    await expect(
+      marketplace.methods.create_listing(contentHash, PRICE, token.address, CATEGORY, fakeAttestorId, registry.address)
+        .send({
+          from: sellerAccount.address,
+          fee: { paymentMethod: sponsoredPaymentMethod },
+          wait: { timeout: TX_TIMEOUT },
+        })
+    ).rejects.toThrow();
+
+    logger.info("Invalid attestor rejection test passed");
   }, 600_000);
 });

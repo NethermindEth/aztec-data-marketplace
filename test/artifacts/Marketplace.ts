@@ -45,14 +45,14 @@ export class MarketplaceContract extends ContractBase {
   /**
    * Creates a tx to deploy a new instance of this contract.
    */
-  public static deploy(wallet: Wallet, admin: AztecAddressLike) {
+  public static deploy(wallet: Wallet, admin: AztecAddressLike, registry: AztecAddressLike) {
     return new DeployMethod<MarketplaceContract>(PublicKeys.default(), wallet, MarketplaceContractArtifact, (instance, wallet) => MarketplaceContract.at(instance.address, wallet), Array.from(arguments).slice(1));
   }
 
   /**
    * Creates a tx to deploy a new instance of this contract using the specified public keys hash to derive the address.
    */
-  public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet, admin: AztecAddressLike) {
+  public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet, admin: AztecAddressLike, registry: AztecAddressLike) {
     return new DeployMethod<MarketplaceContract>(publicKeys, wallet, MarketplaceContractArtifact, (instance, wallet) => MarketplaceContract.at(instance.address, wallet), Array.from(arguments).slice(2));
   }
 
@@ -90,38 +90,41 @@ export class MarketplaceContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'admin' | 'listings' | 'next_listing_id' | 'listing_notes' | 'escrows' | 'data_notes'> {
+  public static get storage(): ContractStorageLayout<'admin' | 'registry' | 'listings' | 'next_listing_id' | 'listing_notes' | 'escrows' | 'data_notes'> {
       return {
         admin: {
       slot: new Fr(1n),
     },
-listings: {
+registry: {
       slot: new Fr(2n),
     },
-next_listing_id: {
+listings: {
       slot: new Fr(3n),
     },
-listing_notes: {
+next_listing_id: {
       slot: new Fr(4n),
     },
-escrows: {
+listing_notes: {
       slot: new Fr(5n),
     },
-data_notes: {
+escrows: {
       slot: new Fr(6n),
+    },
+data_notes: {
+      slot: new Fr(7n),
     }
-      } as ContractStorageLayout<'admin' | 'listings' | 'next_listing_id' | 'listing_notes' | 'escrows' | 'data_notes'>;
+      } as ContractStorageLayout<'admin' | 'registry' | 'listings' | 'next_listing_id' | 'listing_notes' | 'escrows' | 'data_notes'>;
     }
     
 
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public declare methods: {
     
-    /** constructor(admin: struct) */
-    constructor: ((admin: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** constructor(admin: struct, registry: struct) */
+    constructor: ((admin: AztecAddressLike, registry: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** create_listing(content_hash: field, price: field, token: struct, category: field) */
-    create_listing: ((content_hash: FieldLike, price: FieldLike, token: AztecAddressLike, category: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** create_listing(content_hash: field, price: field, token: struct, category: field, attestor_id: field, registry_address: struct) */
+    create_listing: ((content_hash: FieldLike, price: FieldLike, token: AztecAddressLike, category: FieldLike, attestor_id: FieldLike, registry_address: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** deliver_and_claim(listing_id: field, buyer: struct, data_0: field, data_1: field, data_2: field, data_3: field) */
     deliver_and_claim: ((listing_id: FieldLike, buyer: AztecAddressLike, data_0: FieldLike, data_1: FieldLike, data_2: FieldLike, data_3: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -143,6 +146,9 @@ data_notes: {
 
     /** refund(listing_id: field, seller: struct) */
     refund: ((listing_id: FieldLike, seller: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** set_registry(new_registry: struct) */
+    set_registry: ((new_registry: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** sync_state() */
     sync_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;

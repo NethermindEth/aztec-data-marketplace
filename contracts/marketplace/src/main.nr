@@ -1,4 +1,4 @@
-// Data Marketplace Contract - Phase 1 POC (v3, public escrow)
+// Data Marketplace Contract - Phase 2 (attestation wiring)
 
 use aztec::macros::aztec;
 
@@ -30,6 +30,7 @@ pub contract Marketplace {
     use crate::data_note::DataNote;
     use crate::listing_note::ListingNote;
     use token::Token;
+    use attestor_registry::AttestorRegistry;
 
     global MIN_DEADLINE_BLOCKS: u32 = 100;
 
@@ -39,12 +40,14 @@ pub contract Marketplace {
         price: Field,
         token: AztecAddress,
         category: Field,
+        attestor_id: Field,
         active: bool,
     }
 
     #[storage]
     struct Storage<Context> {
         admin: PublicMutable<AztecAddress, Context>,
+        registry: PublicMutable<AztecAddress, Context>,
         listings: Map<Field, PublicMutable<ListingEntry, Context>, Context>,
         next_listing_id: PublicMutable<Field, Context>,
         listing_notes: Owned<PrivateSet<ListingNote, Context>, Context>,
@@ -54,14 +57,25 @@ pub contract Marketplace {
 
     #[external("public")]
     #[initializer]
-    fn constructor(admin: AztecAddress) {
+    fn constructor(admin: AztecAddress, registry: AztecAddress) {
+        assert(!admin.is_zero(), "invalid admin");
+        assert(!registry.is_zero(), "invalid registry address");
         self.storage.admin.write(admin);
+        self.storage.registry.write(registry);
         self.storage.next_listing_id.write(1);
     }
 
     // ---------------------------------------------------------------
     // Create Listing (Seller)
     // ---------------------------------------------------------------
+    // The seller provides an attestor_id. The private function creates
+    // the listing note and enqueues two public calls:
+    // 1. A view call to the AttestorRegistry to assert the attestor
+    //    is registered and active. If it fails, the whole tx reverts.
+    // 2. A self-call to register the listing in the public index.
+    //
+    // Signature verification against the attestor's key will be added
+    // when App Attest integration is implemented.
 
     #[external("private")]
     fn create_listing(
@@ -69,6 +83,8 @@ pub contract Marketplace {
         price: Field,
         token: AztecAddress,
         category: Field,
+        attestor_id: Field,
+        registry_address: AztecAddress,
     ) {
         let seller = self.msg_sender();
 
@@ -80,7 +96,15 @@ pub contract Marketplace {
             .insert(listing)
             .deliver(MessageDelivery.ONCHAIN_UNCONSTRAINED);
 
-        self.enqueue(Marketplace::at(self.context.this_address())._register_listing(content_hash, price, token, category));
+        // Enqueue a view call to the registry to verify the attestor
+        // is registered and active. Reverts the whole tx if not.
+        // Using enqueue_view_incognito to hide the marketplace address
+        // from the public call, for better privacy.
+        AttestorRegistry::at(registry_address)
+            .assert_attestor_active(attestor_id)
+            .enqueue_view_incognito(self.context);
+
+        self.enqueue_self._register_listing(content_hash, price, token, category, attestor_id, registry_address);
     }
 
     #[external("public")]
@@ -90,7 +114,17 @@ pub contract Marketplace {
         price: Field,
         token: AztecAddress,
         category: Field,
+        attestor_id: Field,
+        registry_address: AztecAddress,
     ) {
+        // Verify the registry address matches what was stored at deployment.
+        // Prevents a malicious seller from passing a fake registry.
+        let stored_registry = self.storage.registry.read();
+        assert(
+            registry_address.eq(stored_registry),
+            "registry address does not match stored registry"
+        );
+
         let listing_id = self.storage.next_listing_id.read();
         self.storage.next_listing_id.write(listing_id + 1);
 
@@ -99,6 +133,7 @@ pub contract Marketplace {
             price,
             token,
             category,
+            attestor_id,
             active: true,
         };
         self.storage.listings.at(listing_id).write(entry);
@@ -244,6 +279,17 @@ pub contract Marketplace {
     fn _check_deadline(deadline: Field) {
         let current_block = self.context.block_number();
         assert(current_block >= deadline as u32, "Deadline has not passed -- refund not yet available");
+    }
+
+    // ---------------------------------------------------------------
+    // Admin
+    // ---------------------------------------------------------------
+
+    #[external("public")]
+    fn set_registry(new_registry: AztecAddress) {
+        assert(self.storage.admin.read().eq(self.msg_sender()), "caller is not admin");
+        assert(!new_registry.is_zero(), "invalid registry address");
+        self.storage.registry.write(new_registry);
     }
 
     // ---------------------------------------------------------------
