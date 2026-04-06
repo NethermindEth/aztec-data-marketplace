@@ -19,20 +19,30 @@ import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/poseidon";
 const NODE_URL = process.env.AZTEC_NODE_URL || "http://localhost:8080";
 const DEPLOY_TIMEOUT = 120_000;
 const TX_TIMEOUT = 60_000;
-const DOM_SEP_FUNCTION_ARGS = 3576554347;
 
 const logger = createLogger("e2e:marketplace");
 
-const DATA_0 = new Fr(1n);
-const DATA_1 = new Fr(68n);
-const DATA_2 = new Fr(1710000000n);
-const DATA_3 = new Fr(1n);
-const BAD_DATA_1 = new Fr(999n);
+// Health data: heart rate 68 bpm, timestamp, source device 1 (Apple Watch), reserved
+const DATA_0 = new Fr(68n);     // measurement value
+const DATA_1 = new Fr(1710000000n); // timestamp
+const DATA_2 = new Fr(1n);      // source device type (1 = Apple Watch)
+const DATA_3 = new Fr(0n);      // reserved
+
+const BAD_DATA_0 = new Fr(999n);  // out of range heart rate
+const BAD_DATA_1 = new Fr(68n);   // wrong data for delivery test
+
 const CATEGORY = new Fr(1n);
 const PRICE = new Fr(100n);
 const PRICE_2 = new Fr(200n);
+const PRICE_3 = new Fr(300n);
+const PRICE_4 = new Fr(400n);
 
-// Test attestor key (placeholder values for POC)
+// Property proof parameters
+const VALUE_MIN = new Fr(40n);   // min valid heart rate
+const VALUE_MAX = new Fr(200n);  // max valid heart rate
+const DEVICE_ID = new Fr(1n);    // Apple Watch
+
+// Test attestor
 const ATTESTOR_KEY_X = new Fr(12345n);
 const ATTESTOR_KEY_Y = new Fr(67890n);
 const ATTESTOR_TYPE_APP_ATTEST = new Fr(1n);
@@ -147,24 +157,32 @@ describe("Data Marketplace E2E", () => {
     await wallet?.stop();
   });
 
-  it("happy path: list, lock payment, deliver and claim", async () => {
-    const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
-    const contentHash = new Fr(contentHashRaw.toBigInt());
-
-    // create_listing now requires attestor_id and registry_address
-    await marketplace.methods.create_listing(contentHash, PRICE, token.address, CATEGORY, attestorId, registry.address)
-      .simulate({ from: sellerAccount.address });
-    await marketplace.methods.create_listing(contentHash, PRICE, token.address, CATEGORY, attestorId, registry.address)
-      .send({
-        from: sellerAccount.address,
-        fee: { paymentMethod: sponsoredPaymentMethod },
-        wait: { timeout: TX_TIMEOUT },
-      });
+  it("happy path: list with proofs, lock payment, deliver and claim", async () => {
+    // create_listing now takes raw data + proof params, computes content hash internally
+    await marketplace.methods.create_listing(
+      DATA_0, DATA_1, DATA_2, DATA_3,
+      PRICE, token.address, CATEGORY,
+      VALUE_MIN, VALUE_MAX, DEVICE_ID,
+      attestorId, registry.address
+    ).simulate({ from: sellerAccount.address });
+    await marketplace.methods.create_listing(
+      DATA_0, DATA_1, DATA_2, DATA_3,
+      PRICE, token.address, CATEGORY,
+      VALUE_MIN, VALUE_MAX, DEVICE_ID,
+      attestorId, registry.address
+    ).send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
 
     const listingId = new Fr(1n);
     const listing = await marketplace.methods.get_listing(listingId).simulate({ from: sellerAccount.address });
     expect(listing.result.active).toBe(true);
     expect(BigInt(listing.result.attestor_id)).toBe(1n);
+    expect(BigInt(listing.result.value_min)).toBe(40n);
+    expect(BigInt(listing.result.value_max)).toBe(200n);
+    expect(BigInt(listing.result.device_id)).toBe(1n);
 
     const lockAction = token.methods.transfer_to_public(buyerAccount.address, marketplace.address, 100n, 0);
     const authWit = await wallet.createAuthWit(buyerAccount.address, { caller: marketplace.address, action: lockAction });
@@ -197,17 +215,22 @@ describe("Data Marketplace E2E", () => {
   }, 600_000);
 
   it("should reject delivery of wrong data", async () => {
-    const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
-    const contentHash = new Fr(contentHashRaw.toBigInt());
-
-    await marketplace.methods.create_listing(contentHash, PRICE_2, token.address, CATEGORY, attestorId, registry.address)
-      .simulate({ from: sellerAccount.address });
-    await marketplace.methods.create_listing(contentHash, PRICE_2, token.address, CATEGORY, attestorId, registry.address)
-      .send({
-        from: sellerAccount.address,
-        fee: { paymentMethod: sponsoredPaymentMethod },
-        wait: { timeout: TX_TIMEOUT },
-      });
+    await marketplace.methods.create_listing(
+      DATA_0, DATA_1, DATA_2, DATA_3,
+      PRICE_2, token.address, CATEGORY,
+      VALUE_MIN, VALUE_MAX, DEVICE_ID,
+      attestorId, registry.address
+    ).simulate({ from: sellerAccount.address });
+    await marketplace.methods.create_listing(
+      DATA_0, DATA_1, DATA_2, DATA_3,
+      PRICE_2, token.address, CATEGORY,
+      VALUE_MIN, VALUE_MAX, DEVICE_ID,
+      attestorId, registry.address
+    ).send({
+      from: sellerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: TX_TIMEOUT },
+    });
 
     const nextId = await marketplace.methods.get_next_listing_id().simulate({ from: sellerAccount.address });
     const listingId = new Fr(BigInt(nextId.result) - 1n);
@@ -228,7 +251,7 @@ describe("Data Marketplace E2E", () => {
       });
 
     await expect(
-      marketplace.methods.deliver_and_claim(listingId, buyerAccount.address, DATA_0, BAD_DATA_1, DATA_2, DATA_3)
+      marketplace.methods.deliver_and_claim(listingId, buyerAccount.address, BAD_DATA_0, DATA_1, DATA_2, DATA_3)
         .send({
           from: sellerAccount.address,
           fee: { paymentMethod: sponsoredPaymentMethod },
@@ -240,20 +263,50 @@ describe("Data Marketplace E2E", () => {
   }, 600_000);
 
   it("should reject listing with invalid attestor", async () => {
-    const contentHashRaw = await poseidon2HashWithSeparator([DATA_0, DATA_1, DATA_2, DATA_3], DOM_SEP_FUNCTION_ARGS);
-    const contentHash = new Fr(contentHashRaw.toBigInt());
-
     const fakeAttestorId = new Fr(999n);
 
     await expect(
-      marketplace.methods.create_listing(contentHash, PRICE, token.address, CATEGORY, fakeAttestorId, registry.address)
-        .send({
-          from: sellerAccount.address,
-          fee: { paymentMethod: sponsoredPaymentMethod },
-          wait: { timeout: TX_TIMEOUT },
-        })
+      marketplace.methods.create_listing(
+        DATA_0, DATA_1, DATA_2, DATA_3,
+        PRICE_3, token.address, CATEGORY,
+        VALUE_MIN, VALUE_MAX, DEVICE_ID,
+        fakeAttestorId, registry.address
+      ).send({
+        from: sellerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      })
     ).rejects.toThrow();
 
     logger.info("Invalid attestor rejection test passed");
+  }, 600_000);
+
+  it("should reject listing with value out of range", async () => {
+    // DATA with heart rate of 999, outside the 40-200 range
+    await expect(
+      marketplace.methods.create_listing(
+        BAD_DATA_0, DATA_1, DATA_2, DATA_3,
+        PRICE_3, token.address, CATEGORY,
+        VALUE_MIN, VALUE_MAX, DEVICE_ID,
+        attestorId, registry.address
+      ).simulate({ from: sellerAccount.address })
+    ).rejects.toThrow();
+
+    logger.info("Value out of range rejection test passed");
+  }, 600_000);
+
+  it("should reject listing with wrong device ID", async () => {
+    const wrongDeviceId = new Fr(99n);
+
+    await expect(
+      marketplace.methods.create_listing(
+        DATA_0, DATA_1, DATA_2, DATA_3,
+        PRICE_4, token.address, CATEGORY,
+        VALUE_MIN, VALUE_MAX, wrongDeviceId,
+        attestorId, registry.address
+      ).simulate({ from: sellerAccount.address })
+    ).rejects.toThrow();
+
+    logger.info("Wrong device ID rejection test passed");
   }, 600_000);
 });

@@ -123,8 +123,8 @@ data_notes: {
     /** constructor(admin: struct, registry: struct) */
     constructor: ((admin: AztecAddressLike, registry: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** create_listing(content_hash: field, price: field, token: struct, category: field, attestor_id: field, registry_address: struct) */
-    create_listing: ((content_hash: FieldLike, price: FieldLike, token: AztecAddressLike, category: FieldLike, attestor_id: FieldLike, registry_address: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** create_listing(data_0: field, data_1: field, data_2: field, data_3: field, price: field, token: struct, category: field, value_min: field, value_max: field, device_id: field, attestor_id: field, registry_address: struct) */
+    create_listing: ((data_0: FieldLike, data_1: FieldLike, data_2: FieldLike, data_3: FieldLike, price: FieldLike, token: AztecAddressLike, category: FieldLike, value_min: FieldLike, value_max: FieldLike, device_id: FieldLike, attestor_id: FieldLike, registry_address: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** deliver_and_claim(listing_id: field, buyer: struct, data_0: field, data_1: field, data_2: field, data_3: field) */
     deliver_and_claim: ((listing_id: FieldLike, buyer: AztecAddressLike, data_0: FieldLike, data_1: FieldLike, data_2: FieldLike, data_3: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
