@@ -18,7 +18,7 @@ pub struct DataNote {
     pub content_hash: Field,
     // Data payload - 4 field elements for POC.
     // Real usage: encode health data into these fields.
-    // e.g. data_0 = metric_type, data_1 = value, data_2 = timestamp, data_3 = source_id
+    // Schema: data_0 = measurement value, data_1 = timestamp, data_2 = source device type, data_3 = reserved
     pub data_0: Field,
     pub data_1: Field,
     pub data_2: Field,
