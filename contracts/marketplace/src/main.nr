@@ -110,14 +110,10 @@ pub contract Marketplace {
         // 1. Compute content hash and bind data to it
         let content_hash = hash_args([data_0, data_1, data_2, data_3]);
 
-        // 2. Value range proof: data_0 must be between value_min and value_max
-        assert(value_min as u64 <= data_0 as u64, "data_0 is below value_min");
-        assert(data_0 as u64 <= value_max as u64, "data_0 is above value_max");
+        // 2. Verify data properties
+        _verify_data_properties(data_0, data_2, value_min, value_max, device_id);
 
-        // 3. Source device proof: data_2 must equal the claimed device_id
-        assert(data_2 == device_id, "data_2 does not match claimed device_id");
-
-        // 4. Create the listing note (commits the content hash)
+        // 3. Create the listing note (commits the content hash)
         let listing = ListingNote {
             listing_id: 0,
             content_hash,
@@ -126,12 +122,12 @@ pub contract Marketplace {
             .insert(listing)
             .deliver(MessageDelivery.ONCHAIN_UNCONSTRAINED);
 
-        // 5. Enqueue attestor check
+        // 4. Enqueue attestor check
         AttestorRegistry::at(registry_address)
             .assert_attestor_active(attestor_id)
             .enqueue_view_incognito(self.context);
 
-        // 6. Register in public index with proof parameters
+        // 5. Register in public index with proof parameters
         self.enqueue_self._register_listing(
             content_hash, price, token, category, attestor_id,
             value_min, value_max, device_id, registry_address
@@ -173,6 +169,29 @@ pub contract Marketplace {
             active: true,
         };
         self.storage.listings.at(listing_id).write(entry);
+    }
+
+    // ---------------------------------------------------------------
+    // Data Property Verification (internal)
+    // ---------------------------------------------------------------
+    // Extracted into a separate function so the verification logic
+    // can be moved to a separate contract later if needed.
+    // Called internally by create_listing during private execution.
+
+    #[contract_library_method]
+    fn _verify_data_properties(
+        data_0: Field,
+        data_2: Field,
+        value_min: Field,
+        value_max: Field,
+        device_id: Field,
+    ) {
+        // Value range proof: data_0 must be between value_min and value_max
+        assert(value_min as u64 <= data_0 as u64, "data_0 is below value_min");
+        assert(data_0 as u64 <= value_max as u64, "data_0 is above value_max");
+
+        // Source device proof: data_2 must equal the claimed device_id
+        assert(data_2 == device_id, "data_2 does not match claimed device_id");
     }
 
     // ---------------------------------------------------------------
