@@ -108,8 +108,8 @@ next_attestor_id: {
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public declare methods: {
     
-    /** assert_attestor_active(attestor_id: field) */
-    assert_attestor_active: ((attestor_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** assert_attestor_key(attestor_id: field, key_hash: field) */
+    assert_attestor_key: ((attestor_id: FieldLike, key_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** constructor(admin: struct) */
     constructor: ((admin: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -135,8 +135,8 @@ next_attestor_id: {
     /** reactivate_attestor(attestor_id: field) */
     reactivate_attestor: ((attestor_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** register_attestor(key_x: field, key_y: field, attestor_type: field) */
-    register_attestor: ((key_x: FieldLike, key_y: FieldLike, attestor_type: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** register_attestor(key_hash: field, attestor_type: field) */
+    register_attestor: ((key_hash: FieldLike, attestor_type: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** set_admin(new_admin: struct) */
     set_admin: ((new_admin: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;

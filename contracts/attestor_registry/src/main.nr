@@ -1,12 +1,17 @@
 // Attestor Registry Contract
 //
 // Stores recognised attestors (data sources) that the marketplace
-// trusts for data provenance. Each attestor has a public key and
+// trusts for data provenance. Each attestor has a key hash and
 // a type (e.g. app-attest, tls-notary, direct-signature).
+//
+// Key hash is used instead of raw public key coordinates because
+// P-256 coordinates are 256 bits, which exceeds the BN254 Field
+// capacity of ~254 bits. Storing a Poseidon2 hash avoids data loss.
 //
 // Admin-gated: only the admin can register or deactivate attestors.
 // The marketplace contract reads from this registry at listing time
-// to verify that data carries a valid attestation.
+// to verify that data carries a valid attestation from a recognised
+// key.
 
 use aztec::macros::aztec;
 
@@ -31,11 +36,10 @@ pub contract AttestorRegistry {
 
     #[derive(Packable)]
     pub struct AttestorEntry {
-        // The attestor's public key (x coordinate).
-        // For ECDSA P-256 (App Attest), this is the x component.
-        pub key_x: Field,
-        // The attestor's public key (y coordinate).
-        pub key_y: Field,
+        // Poseidon2 hash of the attestor's public key bytes.
+        // Computed as poseidon2_hash([...pub_key_x_bytes, ...pub_key_y_bytes])
+        // where each byte is a separate Field element (64 Fields total).
+        pub key_hash: Field,
         // Attestor type: 1 = app-attest, 2 = tls-notary, 3 = direct-signature
         pub attestor_type: Field,
         // Whether this attestor is currently active.
@@ -61,11 +65,12 @@ pub contract AttestorRegistry {
     // ---------------------------------------------------------------
     // Register Attestor (Admin only)
     // ---------------------------------------------------------------
+    // The admin provides a pre-computed key hash. The admin is trusted
+    // to compute this correctly (poseidon2 over the 64 key byte Fields).
 
     #[external("public")]
     fn register_attestor(
-        key_x: Field,
-        key_y: Field,
+        key_hash: Field,
         attestor_type: Field,
     ) {
         let caller = self.msg_sender();
@@ -82,8 +87,7 @@ pub contract AttestorRegistry {
         self.storage.next_attestor_id.write(attestor_id + 1);
 
         let entry = AttestorEntry {
-            key_x,
-            key_y,
+            key_hash,
             attestor_type,
             active: true,
         };
@@ -125,15 +129,17 @@ pub contract AttestorRegistry {
     // ---------------------------------------------------------------
     // Public check (callable by other contracts)
     // ---------------------------------------------------------------
-    // Used by the Marketplace to verify an attestor is registered
-    // and active. Called via enqueue_view from a private function.
-    // Reverts if the attestor is not active.
+    // Used by the Marketplace to verify an attestor is registered,
+    // active, AND that the provided key hash matches the stored one.
+    // Called via enqueue_view_incognito from a private function.
+    // Reverts if any check fails.
 
     #[external("public")]
     #[view]
-    fn assert_attestor_active(attestor_id: Field) {
+    fn assert_attestor_key(attestor_id: Field, key_hash: Field) {
         let entry = self.storage.attestors.at(attestor_id).read();
         assert(entry.active, "attestor is not registered or not active");
+        assert(entry.key_hash == key_hash, "key hash does not match registered attestor");
     }
 
     // ---------------------------------------------------------------

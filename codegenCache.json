@@ -1,10 +1,10 @@
 {
   "marketplace_contract-Marketplace.json": {
     "contractName": "Marketplace",
-    "hash": "3901e0ef1958b01a642f0896552f63dcc84465d52d273971faa2ff7e16b2f689"
+    "hash": "b6f5814f43cd34b8927b8826f67c3bd578effef3ab2592d23ca93ec65efc68ca"
   },
   "attestor_registry-AttestorRegistry.json": {
     "contractName": "AttestorRegistry",
-    "hash": "de09aa77b3415d06f4234796f073b7be7141526999668093b56b70b79f3f63bf"
+    "hash": "35e3b7aea61d5bbe06c98acc989acaf975d7e477639023316909092aaf98503a"
   }
 }
