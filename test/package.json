@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "rm -rf store/pxe && NODE_NO_WARNINGS=1 node --experimental-vm-modules $(which jest || echo ./node_modules/.bin/jest) --no-cache --runInBand",
-    "test:e2e": "rm -rf store/pxe && NODE_NO_WARNINGS=1 node --experimental-vm-modules $(which jest || echo ./node_modules/.bin/jest) --no-cache --runInBand --testPathPattern=e2e"
+    "test:e2e": "rm -rf store/pxe && NODE_NO_WARNINGS=1 node --experimental-vm-modules $(which jest || echo ./node_modules/.bin/jest) --no-cache --runInBand --testPathPattern=e2e",
+    "deploy:marketplace": "NODE_NO_WARNINGS=1 node --loader ts-node/esm scripts/deploy_marketplace.ts"
     },
   "dependencies": {
     "@aztec/accounts": "4.1.0-rc.2",
