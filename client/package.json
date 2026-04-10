@@ -1,0 +1,33 @@
+{
+  "name": "data-marketplace-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@aztec/aztec.js": "4.1.0-rc.2",
+    "@aztec/constants": "4.1.0-rc.2",
+    "@aztec/foundation": "4.1.0-rc.2",
+    "@aztec/noir-contracts.js": "4.1.0-rc.2",
+    "@aztec/wallets": "4.1.0-rc.2",
+    "buffer": "^6.0.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.0",
+    "vite-plugin-node-polyfills": "^0.26.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.0"
+  }
+}

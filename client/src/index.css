@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-on-surface font-body;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: rgba(14, 14, 52, 0.85);
+    backdrop-filter: blur(32px);
+    border: 1px solid rgba(64, 64, 128, 0.3);
+  }
+  .neon-glow {
+    text-shadow: 0 0 10px rgba(200, 243, 19, 0.4);
+  }
+}
+
+/* Material Symbols default weight */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 24;
+}
