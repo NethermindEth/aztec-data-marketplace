@@ -95,11 +95,11 @@ export default function Gateway() {
     setStatusMessage("Generating keys...");
 
     try {
-      const account = await createAccount((msg) => setStatusMessage(msg));
+      const { address } = await createAccount((msg) => setStatusMessage(msg));
       const wallet = await getWallet();
       const pm = getPaymentMethod();
 
-      setConnection(wallet, account.address, pm);
+      setConnection(wallet, address, pm);
       navigate("/browse");
     } catch (err) {
       console.error("Account creation failed:", err);

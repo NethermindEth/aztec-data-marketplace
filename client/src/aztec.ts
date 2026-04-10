@@ -18,6 +18,7 @@ import type { AccountManager } from "@aztec/aztec.js/account";
 
 import { MarketplaceContract, MarketplaceContractArtifact } from "../../test/artifacts/Marketplace.js";
 import { AttestorRegistryContract, AttestorRegistryContractArtifact } from "../../test/artifacts/AttestorRegistry.js";
+import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token";
 
 import {
   AZTEC_NODE_URL,
@@ -93,16 +94,32 @@ export async function getExistingAccounts(
   wallet: EmbeddedWallet,
 ): Promise<AztecAddress[]> {
   try {
-    // Try the available API methods to find registered accounts
     const accounts = await wallet.getRegisteredAddresses();
-    return accounts.map((a: any) => a.address ?? a);
+    return accounts.map((a: any) => {
+      const raw = a.address ?? a.item ?? a;
+      // Ensure we have a proper AztecAddress
+      if (typeof raw === "object" && raw.item) {
+        return AztecAddress.fromString(raw.item.toString());
+      }
+      if (typeof raw.toString === "function" && raw.toString() !== "[object Object]") {
+        return AztecAddress.fromString(raw.toString());
+      }
+      return raw;
+    });
   } catch {
     try {
-      // Fallback: PXE might expose it differently
       const accounts = await (wallet as any).getAccounts();
-      return accounts.map((a: any) => a.address ?? a);
+      return accounts.map((a: any) => {
+        const raw = a.address ?? a.item ?? a;
+        if (typeof raw === "object" && raw.item) {
+          return AztecAddress.fromString(raw.item.toString());
+        }
+        if (typeof raw.toString === "function" && raw.toString() !== "[object Object]") {
+          return AztecAddress.fromString(raw.toString());
+        }
+        return raw;
+      });
     } catch {
-      // No accounts found or API not available
       return [];
     }
   }
@@ -143,7 +160,14 @@ export async function createAccount(
   onStatus?.("Registering contracts...");
   await registerContracts(wallet);
 
-  return account;
+  // account.address may be wrapped as {alias, item: AztecAddress}
+  // Extract the actual AztecAddress
+  const rawAddr = account.address as any;
+  const actualAddress = rawAddr?.item
+    ? AztecAddress.fromString(rawAddr.item.toString())
+    : account.address;
+
+  return { account, address: actualAddress };
 }
 
 /**
@@ -197,5 +221,16 @@ async function registerContracts(wallet: EmbeddedWallet): Promise<void> {
     console.log("[aztec] AttestorRegistry registered");
   } catch (e) {
     console.error("[aztec] AttestorRegistry registration failed:", (e as Error).message);
+  }
+
+  const token = TOKEN_ADDRESS();
+  console.log("[aztec] Registering Token at", token.toString());
+  try {
+    const tokenInstance = await nodeClient.getContract(token);
+    if (!tokenInstance) throw new Error("Token not found on node");
+    await wallet.registerContract(tokenInstance, TokenContractArtifact);
+    console.log("[aztec] Token registered");
+  } catch (e) {
+    console.error("[aztec] Token registration failed:", (e as Error).message);
   }
 }
