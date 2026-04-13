@@ -1,18 +1,13 @@
 /**
  * Purchase screen — buyer locks payment for a listing.
  *
- * Flow:
- * 1. Load listing details from on-chain public index
- * 2. Optionally mint test tokens (admin → buyer public, then transfer to private)
- * 3. Create auth witness for token transfer_to_public
- * 4. Call lock_payment with auth witness attached
- *
- * The seller address comes from VITE_SELLER_ADDRESS (MVP demo shortcut).
- * TODO (production): seller address passed via off-chain relay, not hardcoded.
+ * Original UI preserved. Functional changes:
+ *   - Seller address from context's listingSellers map (not config)
+ *   - Success state links to Deliver page
  */
 
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAztec } from "../context.js";
 import { Fr } from "@aztec/aztec.js/fields";
 import { AztecAddress } from "@aztec/aztec.js/addresses";
@@ -21,7 +16,6 @@ import { TokenContract } from "@aztec/noir-contracts.js/Token";
 import {
   MARKETPLACE_ADDRESS,
   TOKEN_ADDRESS,
-  SELLER_ADDRESS,
   ADMIN_ADDRESS,
   ADMIN_SECRET,
   ADMIN_SALT,
@@ -42,10 +36,11 @@ function label(map: Record<string, string>, key: bigint, fallback: string): stri
 export default function Purchase() {
   const { listingId } = useParams<{ listingId: string }>();
   const navigate = useNavigate();
-  const { wallet, accountAddress, paymentMethod } = useAztec();
+  const { wallet, accountAddress, paymentMethod, getListingSeller } = useAztec();
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [listing, setListing] = useState<ListingData | null>(null);
+  const [sellerAddr, setSellerAddr] = useState<string | null>(null);
   const [deadline, setDeadline] = useState("200");
   const [hasMinted, setHasMinted] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -76,6 +71,11 @@ export default function Purchase() {
           attestorId: BigInt(r.attestor_id),
           active: r.active,
         });
+
+        // Look up seller from context
+        const info = getListingSeller(Number(listingId));
+        setSellerAddr(info?.seller ?? null);
+
         setPhase("ready");
       } catch (err) {
         if (cancelled) return;
@@ -87,9 +87,9 @@ export default function Purchase() {
 
     load();
     return () => { cancelled = true; };
-  }, [wallet, accountAddress, listingId]);
+  }, [wallet, accountAddress, listingId, getListingSeller]);
 
-  // Mint test tokens to buyer
+  // Mint test tokens
   async function handleMint() {
     if (!wallet || !accountAddress || !paymentMethod || !listing) return;
 
@@ -98,49 +98,36 @@ export default function Purchase() {
 
     try {
       const tokenAddress = TOKEN_ADDRESS();
-      const adminAddress = ADMIN_ADDRESS();
       const token = TokenContract.at(tokenAddress, wallet);
 
-      // We need the admin account to mint. Create it from env keys.
       const adminSecret = ADMIN_SECRET();
       const adminSalt = ADMIN_SALT();
       const adminSigningKeyHex = ADMIN_SIGNING_KEY();
       const adminSigningKey = GrumpkinScalar.fromString(adminSigningKeyHex);
       const adminAccount = await wallet.createSchnorrAccount(adminSecret, adminSalt, adminSigningKey);
 
-      // Extract proper address
       const rawAdminAddr = adminAccount.address as any;
       const adminAddr = rawAdminAddr?.item
         ? AztecAddress.fromString(rawAdminAddr.item.toString())
         : adminAccount.address;
 
-      const mintAmount = listing.price + 1000n; // extra buffer
+      const mintAmount = listing.price + 1000n;
 
-      // 1. Mint to public balance
       setStatusMessage("Minting to public balance...");
-      await token.methods
-        .mint_to_public(accountAddress, mintAmount)
-        .simulate({ from: adminAddr });
-      await token.methods
-        .mint_to_public(accountAddress, mintAmount)
-        .send({
-          from: adminAddr,
-          fee: { paymentMethod },
-          wait: { timeout: 60_000 },
-        });
+      await token.methods.mint_to_public(accountAddress, mintAmount).simulate({ from: adminAddr });
+      await token.methods.mint_to_public(accountAddress, mintAmount).send({
+        from: adminAddr,
+        fee: { paymentMethod },
+        wait: { timeout: 60_000 },
+      });
 
-      // 2. Transfer to private balance (lock_payment uses transfer_to_public from private)
       setStatusMessage("Transferring to private balance...");
-      await token.methods
-        .transfer_to_private(accountAddress, mintAmount)
-        .simulate({ from: accountAddress });
-      await token.methods
-        .transfer_to_private(accountAddress, mintAmount)
-        .send({
-          from: accountAddress,
-          fee: { paymentMethod },
-          wait: { timeout: 60_000 },
-        });
+      await token.methods.transfer_to_private(accountAddress, mintAmount).simulate({ from: accountAddress });
+      await token.methods.transfer_to_private(accountAddress, mintAmount).send({
+        from: accountAddress,
+        fee: { paymentMethod },
+        wait: { timeout: 60_000 },
+      });
 
       console.log("[purchase] Minted and transferred", mintAmount.toString(), "tokens");
       setHasMinted(true);
@@ -154,7 +141,7 @@ export default function Purchase() {
 
   // Lock payment
   async function handlePurchase() {
-    if (!wallet || !accountAddress || !paymentMethod || !listing) return;
+    if (!wallet || !accountAddress || !paymentMethod || !listing || !sellerAddr) return;
 
     setPhase("purchasing");
     setStatusMessage("Creating auth witness...");
@@ -162,51 +149,32 @@ export default function Purchase() {
     try {
       const tokenAddress = TOKEN_ADDRESS();
       const marketplaceAddress = MARKETPLACE_ADDRESS();
-      const sellerAddress = SELLER_ADDRESS();
+      const sellerAddress = AztecAddress.fromString(sellerAddr);
       const token = TokenContract.at(tokenAddress, wallet);
 
       const listingIdField = new Fr(BigInt(listing.id));
       const priceField = new Fr(listing.price);
       const deadlineField = new Fr(BigInt(deadline));
 
-      // Create auth witness for the token transfer_to_public call
-      // that lock_payment will make on behalf of the buyer
       const lockAction = token.methods.transfer_to_public(
-        accountAddress,
-        marketplaceAddress,
-        listing.price,
-        0,
+        accountAddress, marketplaceAddress, listing.price, 0,
       );
       const authWit = await wallet.createAuthWit(accountAddress, {
         caller: marketplaceAddress,
         action: lockAction,
       });
 
-      // Simulate
       setStatusMessage("Simulating transaction...");
       const marketplace = MarketplaceContract.at(marketplaceAddress, wallet);
 
       await marketplace.methods
-        .lock_payment(
-          listingIdField,
-          sellerAddress,
-          priceField,
-          tokenAddress,
-          deadlineField,
-        )
+        .lock_payment(listingIdField, sellerAddress, priceField, tokenAddress, deadlineField)
         .with({ authWitnesses: [authWit] })
         .simulate({ from: accountAddress });
 
-      // Send
       setStatusMessage("Sending transaction (this may take a minute)...");
       await marketplace.methods
-        .lock_payment(
-          listingIdField,
-          sellerAddress,
-          priceField,
-          tokenAddress,
-          deadlineField,
-        )
+        .lock_payment(listingIdField, sellerAddress, priceField, tokenAddress, deadlineField)
         .with({ authWitnesses: [authWit] })
         .send({
           from: accountAddress,
@@ -253,6 +221,16 @@ export default function Purchase() {
         {/* Ready */}
         {(phase === "ready" || phase === "minting" || phase === "purchasing") && listing && (
           <div className="space-y-10">
+            {/* No seller warning */}
+            {!sellerAddr && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-sm">
+                <p className="text-yellow-400 font-mono text-xs">
+                  Seller address unknown for this listing. Create a listing from one account
+                  and purchase from another in the same session.
+                </p>
+              </div>
+            )}
+
             {/* Listing details */}
             <div className="bg-surface p-8 border border-outline/30">
               <div className="flex justify-between items-start mb-8">
@@ -361,7 +339,12 @@ export default function Purchase() {
             {phase === "ready" && hasMinted && (
               <button
                 onClick={handlePurchase}
-                className="w-full py-4 px-4 font-mono font-bold text-xs uppercase tracking-[0.2em] bg-primary text-on-primary hover:opacity-80 transition-opacity active:scale-[0.98]"
+                disabled={!sellerAddr}
+                className={`w-full py-4 px-4 font-mono font-bold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all rounded-sm ${
+                  sellerAddr
+                    ? "bg-primary text-on-primary hover:opacity-90"
+                    : "bg-outline/30 text-on-surface-variant cursor-not-allowed"
+                }`}
               >
                 Lock Payment and Purchase
               </button>
@@ -397,32 +380,35 @@ export default function Purchase() {
               Payment Locked
             </h2>
             <p className="text-on-surface-variant font-body italic mb-8">
-              Your payment is in escrow. The seller will deliver the data
-              and claim payment atomically.
+              Switch to the seller account using the header dropdown, then
+              deliver the data to complete the transaction.
             </p>
-            <button
-              onClick={() => navigate("/browse")}
-              className="inline-block bg-primary text-on-primary px-8 py-4 font-mono font-bold text-xs uppercase tracking-[0.2em] hover:opacity-80 transition-opacity active:scale-95"
-            >
-              Back to Browse
-            </button>
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={() => navigate("/browse")}
+                className="bg-surface-container text-on-surface py-3 px-6 rounded-sm font-bold text-xs uppercase tracking-widest hover:border-primary/40 border border-outline/30 transition-colors"
+              >
+                Back to Browse
+              </button>
+              <Link
+                to={`/deliver/${listing?.id}`}
+                className="bg-primary text-on-primary py-3 px-6 rounded-sm font-bold text-xs uppercase tracking-widest hover:opacity-90 transition-all"
+              >
+                Go to Deliver
+              </Link>
+            </div>
           </div>
         )}
 
         {/* Error */}
         {phase === "error" && (
-          <div className="text-center py-20">
-            <div className="w-12 h-12 mx-auto flex items-center justify-center bg-red-500/10 rounded-sm border border-red-500/30 mb-4">
-              <span className="material-symbols-outlined text-red-400 text-2xl">
-                error
-              </span>
+          <div className="space-y-6">
+            <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-sm">
+              <p className="text-red-400 font-mono text-xs">{errorMessage}</p>
             </div>
-            <p className="text-red-400 font-mono text-xs mb-4 max-w-lg mx-auto break-words">
-              {errorMessage}
-            </p>
             <button
-              onClick={() => setPhase("ready")}
-              className="text-primary font-mono text-xs uppercase tracking-wider hover:underline"
+              onClick={() => { setErrorMessage(""); setPhase("ready"); }}
+              className="bg-surface-container text-on-surface py-3 px-6 rounded-sm font-bold text-xs transition-all uppercase tracking-widest hover:border-primary/40 border border-outline/30"
             >
               Try Again
             </button>

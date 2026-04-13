@@ -2,10 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
-// https://vite.dev/config/
 export default defineConfig({
   server: {
-    // Headers needed for bb WASM to work in multithreaded mode
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "credentialless",
@@ -17,6 +15,9 @@ export default defineConfig({
       include: ["buffer", "path", "process", "net", "tty", "util", "stream"],
     }),
   ],
+  define: {
+    "process.env": {},
+  },
   optimizeDeps: {
     include: ["pino", "pino/browser"],
     exclude: [

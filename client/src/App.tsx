@@ -4,6 +4,7 @@ import Gateway from "./screens/Gateway.js";
 import Browse from "./screens/Browse.js";
 import CreateListing from "./screens/CreateListing.js";
 import Purchase from "./screens/Purchase.js";
+import Deliver from "./screens/Deliver.js";
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/browse" element={<Browse />} />
         <Route path="/create" element={<CreateListing />} />
         <Route path="/purchase/:listingId" element={<Purchase />} />
+        <Route path="/deliver/:listingId" element={<Deliver />} />
       </Route>
     </Routes>
   );

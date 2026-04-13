@@ -1,12 +1,8 @@
 /**
  * Create Listing screen — seller lists attested health data.
  *
- * Flow:
- * 1. Seller fills form (data value, timestamp, device, price, category, range)
- * 2. Client computes content hash (Poseidon2 with DOM_SEP_FUNCTION_ARGS)
- * 3. Signs with test attestor P-256 key via Web Crypto
- * 4. Normalises to low-s
- * 5. Calls create_listing with all parameters
+ * Original UI preserved. Only functional change: stores listing-to-seller
+ * mapping in context after successful creation.
  */
 
 import { useState } from "react";
@@ -37,9 +33,8 @@ type Phase = "form" | "signing" | "submitting" | "success" | "error";
 
 export default function CreateListing() {
   const navigate = useNavigate();
-  const { wallet, accountAddress, paymentMethod } = useAztec();
+  const { wallet, accountAddress, paymentMethod, setListingSeller } = useAztec();
 
-  // Form state
   const [dataValue, setDataValue] = useState("68");
   const [timestamp, setTimestamp] = useState(
     Math.floor(Date.now() / 1000).toString(),
@@ -50,7 +45,6 @@ export default function CreateListing() {
   const [valueMin, setValueMin] = useState("40");
   const [valueMax, setValueMax] = useState("200");
 
-  // Status
   const [phase, setPhase] = useState<Phase>("form");
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -63,53 +57,43 @@ export default function CreateListing() {
     }
 
     try {
-      // 1. Convert form values to Fr
       setPhase("signing");
       setStatusMessage("Preparing data fields...");
 
       const d0 = new Fr(BigInt(dataValue));
       const d1 = new Fr(BigInt(timestamp));
       const d2 = new Fr(BigInt(deviceType));
-      const d3 = new Fr(0n); // reserved
+      const d3 = new Fr(0n);
 
       const priceField = new Fr(BigInt(price));
       const categoryField = new Fr(BigInt(category));
       const valueMinField = new Fr(BigInt(valueMin));
       const valueMaxField = new Fr(BigInt(valueMax));
-      const deviceIdField = new Fr(BigInt(deviceType)); // must match d2
+      const deviceIdField = new Fr(BigInt(deviceType));
 
-      // 2. Compute content hash
       setStatusMessage("Computing content hash...");
       const contentHash = await computeContentHash(d0, d1, d2, d3);
       console.log("[create] Content hash:", contentHash.toString());
 
-      // 3. Import attestor private key and sign
       setStatusMessage("Signing with attestor key...");
       const privateKey = await importP256PrivateKey(ATTESTOR_PRIVATE_KEY());
       const signature = await signContentHash(contentHash, privateKey);
       console.log("[create] Signature computed (64 bytes, low-s normalised)");
 
-      // 4. Convert signature and public key to Field arrays
       const sigFields = bytesToFieldArray(signature, 64);
-
       const pkXBytes = hexToBytes(ATTESTOR_PUBLIC_KEY_X());
       const pkYBytes = hexToBytes(ATTESTOR_PUBLIC_KEY_Y());
       const pkXFields = bytesToFieldArray(pkXBytes, 32);
       const pkYFields = bytesToFieldArray(pkYBytes, 32);
 
-      // 5. Get contract addresses
       const tokenAddress = TOKEN_ADDRESS();
       const registryAddress = REGISTRY_ADDRESS();
       const attestorId = ATTESTOR_ID;
 
-      // 6. Call create_listing
       setPhase("submitting");
       setStatusMessage("Simulating transaction...");
 
-      const marketplace = MarketplaceContract.at(
-        MARKETPLACE_ADDRESS(),
-        wallet,
-      );
+      const marketplace = MarketplaceContract.at(MARKETPLACE_ADDRESS(), wallet);
 
       await marketplace.methods
         .create_listing(
@@ -138,16 +122,32 @@ export default function CreateListing() {
         });
 
       console.log("[create] Listing created successfully");
+
+      // Store listing-to-seller mapping so buyer knows the seller address
+      try {
+        const nextIdResult = await marketplace.methods
+          .get_next_listing_id()
+          .simulate({ from: accountAddress });
+        const nextId = Number(BigInt(nextIdResult.result));
+        const createdId = nextId - 1;
+        setListingSeller(createdId, {
+          seller: accountAddress.toString(),
+          data0: dataValue,
+          data1: timestamp,
+          data2: deviceType,
+          data3: "0",
+        });
+        console.log(`[create] Stored listing info: listing ${createdId} -> ${accountAddress.toString()}`);
+      } catch (err) {
+        console.warn("[create] Could not store seller mapping:", err);
+      }
+
       setPhase("success");
       setStatusMessage("Listing created!");
-
-      // Navigate to browse after a moment
       setTimeout(() => navigate("/browse"), 2000);
     } catch (err) {
       console.error("[create] Failed:", err);
-      setErrorMessage(
-        err instanceof Error ? err.message : "Failed to create listing",
-      );
+      setErrorMessage(err instanceof Error ? err.message : "Failed to create listing");
       setPhase("error");
     }
   }
@@ -186,12 +186,12 @@ export default function CreateListing() {
                     value={dataValue}
                     onChange={(e) => setDataValue(e.target.value)}
                     className="w-full bg-surface-container border border-outline/30 text-on-surface px-4 py-3 font-mono text-sm focus:border-primary/50 focus:outline-none"
-                    placeholder="e.g. 68 (heart rate BPM)"
+                    placeholder="e.g. 68 (heart rate bpm)"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant mb-2">
-                    Timestamp (Unix)
+                    Timestamp (unix)
                   </label>
                   <input
                     type="number"
@@ -210,9 +210,7 @@ export default function CreateListing() {
                     className="w-full bg-surface-container border border-outline/30 text-on-surface px-4 py-3 font-mono text-sm focus:border-primary/50 focus:outline-none"
                   >
                     {Object.entries(DEVICE_LABELS).map(([val, lbl]) => (
-                      <option key={val} value={val}>
-                        {lbl}
-                      </option>
+                      <option key={val} value={val}>{lbl}</option>
                     ))}
                   </select>
                 </div>
@@ -226,9 +224,7 @@ export default function CreateListing() {
                     className="w-full bg-surface-container border border-outline/30 text-on-surface px-4 py-3 font-mono text-sm focus:border-primary/50 focus:outline-none"
                   >
                     {Object.entries(CATEGORY_LABELS).map(([val, lbl]) => (
-                      <option key={val} value={val}>
-                        {lbl}
-                      </option>
+                      <option key={val} value={val}>{lbl}</option>
                     ))}
                   </select>
                 </div>
@@ -278,29 +274,25 @@ export default function CreateListing() {
             </div>
 
             {/* Attestor info */}
-            <div className="bg-surface-container border border-outline/30 p-6">
-              <div className="flex items-center gap-3 mb-3">
-                <span
-                  className="material-symbols-outlined text-primary"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  verified
-                </span>
-                <span className="font-mono text-xs text-on-surface uppercase tracking-wider font-bold">
-                  Test Attestor (ID {ATTESTOR_ID.toString()})
-                </span>
+            <div>
+              <h3 className="font-headline italic font-bold text-xl mb-6 border-b border-primary/20 pb-2">
+                Attestation
+              </h3>
+              <div className="bg-surface-container border border-outline/20 p-4 font-mono text-[11px] space-y-2 rounded-sm">
+                <div className="flex justify-between">
+                  <span className="text-on-surface-variant uppercase">Attestor ID</span>
+                  <span className="text-primary">1 (App Attest)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-on-surface-variant uppercase">Signature</span>
+                  <span className="text-on-surface">ECDSA P-256 (auto-signed)</span>
+                </div>
               </div>
-              <p className="text-on-surface-variant text-xs font-body italic">
-                The listing will be signed with the test attestor's P-256 key.
-                The contract verifies this signature and checks the key against
-                the attestor registry.
-              </p>
             </div>
 
-            {/* Submit */}
             <button
               onClick={handleSubmit}
-              className="w-full py-4 px-4 font-mono font-bold text-xs uppercase tracking-[0.2em] bg-primary text-on-primary hover:opacity-80 transition-opacity active:scale-[0.98]"
+              className="w-full bg-primary text-on-primary py-4 rounded-sm font-bold text-xs active:scale-[0.98] transition-all uppercase tracking-widest hover:opacity-90"
             >
               Sign and Create Listing
             </button>
@@ -316,11 +308,9 @@ export default function CreateListing() {
             <p className="text-on-surface-variant font-mono text-xs uppercase tracking-widest mb-2">
               {statusMessage}
             </p>
-            {phase === "submitting" && (
-              <p className="text-on-surface-variant/60 text-[10px] font-body italic">
-                Transaction may take up to two minutes
-              </p>
-            )}
+            <p className="text-on-surface-variant/60 text-[10px] font-body italic">
+              This may take a minute or two
+            </p>
           </div>
         )}
 
@@ -344,18 +334,13 @@ export default function CreateListing() {
 
         {/* Error */}
         {phase === "error" && (
-          <div className="text-center py-20">
-            <div className="w-12 h-12 mx-auto flex items-center justify-center bg-red-500/10 rounded-sm border border-red-500/30 mb-4">
-              <span className="material-symbols-outlined text-red-400 text-2xl">
-                error
-              </span>
+          <div className="space-y-6">
+            <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-sm">
+              <p className="text-red-400 font-mono text-xs">{errorMessage}</p>
             </div>
-            <p className="text-red-400 font-mono text-xs mb-4 max-w-lg mx-auto break-words">
-              {errorMessage}
-            </p>
             <button
-              onClick={() => setPhase("form")}
-              className="text-primary font-mono text-xs uppercase tracking-wider hover:underline"
+              onClick={() => { setErrorMessage(""); setPhase("form"); }}
+              className="bg-surface-container text-on-surface py-3 px-6 rounded-sm font-bold text-xs transition-all uppercase tracking-widest hover:border-primary/40 border border-outline/30"
             >
               Try Again
             </button>

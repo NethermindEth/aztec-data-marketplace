@@ -1,12 +1,8 @@
 /**
- * Gateway screen — connect or create an Aztec account.
+ * Gateway screen — connect or create Aztec accounts.
  *
- * Flow:
- * 1. Initialise EmbeddedWallet (PXE in browser, persists to IndexedDB)
- * 2. Check for existing accounts
- *    - If found: show "Resume" option with truncated address
- *    - If not: show "Create New Account" button
- * 3. On connect/create: register contracts, set context, navigate to /browse
+ * Original UI preserved: glass-panel, feature cards, Material Symbols.
+ * Added: multi-account support, resume all, create additional accounts.
  */
 
 import { useEffect, useState } from "react";
@@ -21,118 +17,99 @@ import {
 } from "../aztec.js";
 import type { AztecAddress } from "@aztec/aztec.js/addresses";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function truncateAddress(addr: string): string {
   if (addr.length <= 14) return addr;
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
 type Phase =
-  | "initialising"   // loading wallet / checking IndexedDB
-  | "ready"          // wallet loaded, showing options
-  | "creating"       // deploying a new account
-  | "resuming"       // resuming an existing account
+  | "waiting"
+  | "initialising"
+  | "ready"
+  | "creating"
+  | "resuming"
   | "error";
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export default function Gateway() {
   const navigate = useNavigate();
-  const { isConnected, setConnection } = useAztec();
+  const { isReconnecting, accounts, addAccount } = useAztec();
 
-  const [phase, setPhase] = useState<Phase>("initialising");
+  const [phase, setPhase] = useState<Phase>("waiting");
   const [existingAccounts, setExistingAccounts] = useState<AztecAddress[]>([]);
   const [statusMessage, setStatusMessage] = useState("Connecting to Aztec node...");
   const [errorMessage, setErrorMessage] = useState("");
 
-  // If already connected (e.g. back-navigated), redirect to browse
   useEffect(() => {
-    if (isConnected) navigate("/browse", { replace: true });
-  }, [isConnected, navigate]);
-
-  // On mount: initialise wallet and check for existing accounts
-  useEffect(() => {
+    if (isReconnecting) return;
     let cancelled = false;
 
     async function init() {
       try {
+        setPhase("initialising");
         setStatusMessage("Connecting to Aztec node...");
         const wallet = await getWallet();
-
         if (cancelled) return;
         setStatusMessage("Checking for existing accounts...");
-
-        const accounts = await getExistingAccounts(wallet);
+        const existing = await getExistingAccounts(wallet);
         if (cancelled) return;
-
-        setExistingAccounts(accounts);
+        setExistingAccounts(existing);
         setPhase("ready");
       } catch (err) {
         if (cancelled) return;
         console.error("Gateway init failed:", err);
-        setErrorMessage(
-          err instanceof Error ? err.message : "Failed to connect to Aztec node",
-        );
+        setErrorMessage(err instanceof Error ? err.message : "Failed to connect to Aztec node");
         setPhase("error");
       }
     }
 
     init();
     return () => { cancelled = true; };
-  }, []);
-
-  // -------------------------------------------------------------------------
-  // Handlers
-  // -------------------------------------------------------------------------
+  }, [isReconnecting]);
 
   async function handleCreateAccount() {
     setPhase("creating");
     setStatusMessage("Generating keys...");
-
     try {
       const { address } = await createAccount((msg) => setStatusMessage(msg));
       const wallet = await getWallet();
       const pm = getPaymentMethod();
+      addAccount(wallet, address, pm);
 
-      setConnection(wallet, address, pm);
-      navigate("/browse");
+      // Register all accounts as senders for note discovery
+      const existing = await getExistingAccounts(wallet);
+      setExistingAccounts(existing);
+
+      if (existing.length > 1) {
+        const { registerSenders } = await import("../aztec.js");
+        await registerSenders(existing);
+      }
+      setPhase("ready");
     } catch (err) {
       console.error("Account creation failed:", err);
-      setErrorMessage(
-        err instanceof Error ? err.message : "Account creation failed",
-      );
+      setErrorMessage(err instanceof Error ? err.message : "Account creation failed");
       setPhase("error");
     }
   }
 
-  async function handleResume(address: AztecAddress) {
+  async function handleResumeAll() {
     setPhase("resuming");
     setStatusMessage("Registering contracts...");
-
     try {
       const wallet = await getWallet();
       await resumeAccount(wallet);
-
       const pm = getPaymentMethod();
-      setConnection(wallet, address, pm);
+      for (const addr of existingAccounts) {
+        addAccount(wallet, addr, pm);
+      }
       navigate("/browse");
     } catch (err) {
       console.error("Resume failed:", err);
-      setErrorMessage(
-        err instanceof Error ? err.message : "Failed to resume account",
-      );
+      setErrorMessage(err instanceof Error ? err.message : "Failed to resume accounts");
       setPhase("error");
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
+  const connectedCount = accounts.length;
 
   return (
     <div className="relative flex items-center justify-center overflow-hidden py-24 px-6 min-h-[calc(100vh-73px)]">
@@ -158,7 +135,6 @@ export default function Gateway() {
           </div>
 
           <p className="text-on-surface-variant text-xl max-w-md leading-relaxed font-body">
-            A marketplace where data sovereignty is a fundamental right.
             Sell your health data with zero-knowledge privacy guarantees.
           </p>
 
@@ -194,7 +170,7 @@ export default function Gateway() {
           </div>
         </div>
 
-        {/* Connection panel */}
+        {/* Connection panel — glass-panel style */}
         <div className="glass-panel p-1 w-full max-w-md mx-auto rounded-lg shadow-[0_40px_80px_-15px_rgba(0,0,0,0.6)]">
           <div className="bg-surface rounded-md p-10 space-y-10">
             <div className="text-center">
@@ -206,8 +182,8 @@ export default function Gateway() {
               </p>
             </div>
 
-            {/* ---- Initialising ---- */}
-            {phase === "initialising" && (
+            {/* Waiting / Initialising */}
+            {(phase === "waiting" || phase === "initialising") && (
               <div className="space-y-6 text-center">
                 <div className="flex justify-center">
                   <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -218,85 +194,100 @@ export default function Gateway() {
               </div>
             )}
 
-            {/* ---- Ready: existing accounts ---- */}
-            {phase === "ready" && existingAccounts.length > 0 && (
+            {/* Ready: existing accounts, not yet connected */}
+            {phase === "ready" && existingAccounts.length > 0 && connectedCount === 0 && (
               <div className="space-y-6">
-                {/* Resume section */}
-                <div className="space-y-3">
-                  <span className="text-[10px] text-on-surface-variant font-mono uppercase tracking-[0.2em] block ml-1">
-                    Resume Existing Account
-                  </span>
-                  {existingAccounts.map((addr) => (
-                    <div
-                      key={addr.toString()}
-                      className="flex items-center justify-between p-5 rounded-sm bg-surface-container border border-primary/20"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 flex items-center justify-center bg-background rounded-sm border border-outline/30">
-                          <span className="material-symbols-outlined text-primary">
-                            fingerprint
-                          </span>
-                        </div>
-                        <div className="text-left">
-                          <p className="text-on-surface font-mono text-sm tracking-tighter">
-                            {truncateAddress(addr.toString())}
-                          </p>
-                          <p className="text-on-surface-variant text-[10px] font-body italic">
-                            Stored in browser
-                          </p>
-                        </div>
+                <span className="text-[10px] text-on-surface-variant font-mono uppercase tracking-[0.2em] block ml-1">
+                  Resume Existing Accounts
+                </span>
+                {existingAccounts.map((addr) => (
+                  <div
+                    key={addr.toString()}
+                    className="flex items-center justify-between p-5 rounded-sm bg-surface-container border border-primary/20"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 flex items-center justify-center bg-background rounded-sm border border-outline/30">
+                        <span className="material-symbols-outlined text-primary">fingerprint</span>
                       </div>
-                      <button
-                        onClick={() => handleResume(addr)}
-                        className="bg-primary text-on-primary px-4 py-2 rounded-sm font-bold text-[10px] uppercase tracking-wider hover:opacity-90 transition-opacity"
-                      >
-                        Continue
-                      </button>
+                      <div className="text-left">
+                        <p className="text-on-surface font-mono text-sm tracking-tighter">
+                          {truncateAddress(addr.toString())}
+                        </p>
+                        <p className="text-on-surface-variant text-[10px] font-body italic">
+                          Stored in browser
+                        </p>
+                      </div>
                     </div>
-                  ))}
-                </div>
-
-                {/* Divider */}
+                  </div>
+                ))}
+                <button
+                  onClick={handleResumeAll}
+                  className="w-full bg-primary text-on-primary py-4 rounded-sm font-bold text-xs active:scale-[0.98] transition-all flex items-center justify-center gap-3 uppercase tracking-widest hover:opacity-90"
+                >
+                  Resume All ({existingAccounts.length})
+                </button>
                 <div className="relative py-4">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-outline/30" />
                   </div>
                   <div className="relative flex justify-center text-[10px]">
-                    <span className="bg-surface px-6 text-on-surface-variant font-mono uppercase tracking-[0.2em]">
-                      or
-                    </span>
+                    <span className="bg-surface px-6 text-on-surface-variant font-mono uppercase tracking-[0.2em]">or</span>
                   </div>
                 </div>
-
-                {/* Create new */}
                 <button
                   onClick={handleCreateAccount}
                   className="w-full bg-surface-container text-on-surface py-4 rounded-sm font-bold text-xs transition-all flex items-center justify-center gap-3 uppercase tracking-widest hover:border-primary/40 border border-outline/30"
                 >
-                  <span
-                    className="material-symbols-outlined text-[20px] text-primary"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    person_add
-                  </span>
+                  <span className="material-symbols-outlined text-[20px] text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>person_add</span>
                   Create New Account
                 </button>
               </div>
             )}
 
-            {/* ---- Ready: no existing accounts ---- */}
-            {phase === "ready" && existingAccounts.length === 0 && (
+            {/* Ready: already connected */}
+            {phase === "ready" && connectedCount > 0 && (
+              <div className="space-y-6">
+                <div className="bg-primary/10 border border-primary/20 p-4 rounded-sm">
+                  <p className="text-primary font-mono text-xs">
+                    {connectedCount} account{connectedCount > 1 ? "s" : ""} connected
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {accounts.map((addr, i) => (
+                      <p key={addr.toString()} className="text-on-surface-variant font-mono text-[10px]">
+                        Account {i + 1}: {truncateAddress(addr.toString())}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={() => navigate("/browse")}
+                  className="w-full bg-primary text-on-primary py-4 rounded-sm font-bold text-xs active:scale-[0.98] transition-all flex items-center justify-center gap-3 uppercase tracking-widest hover:opacity-90"
+                >
+                  Enter Marketplace
+                </button>
+                <button
+                  onClick={handleCreateAccount}
+                  className="w-full bg-surface-container text-on-surface py-4 rounded-sm font-bold text-xs transition-all flex items-center justify-center gap-3 uppercase tracking-widest hover:border-primary/40 border border-outline/30"
+                >
+                  <span className="material-symbols-outlined text-[20px] text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>person_add</span>
+                  Create Another Account
+                </button>
+                {connectedCount === 1 && (
+                  <p className="text-center text-[10px] text-on-surface-variant leading-relaxed px-4 font-mono uppercase tracking-widest">
+                    Tip: create a second account to test the full buyer/seller flow
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Ready: no accounts at all */}
+            {phase === "ready" && existingAccounts.length === 0 && connectedCount === 0 && (
               <div className="space-y-4">
                 <button
                   onClick={handleCreateAccount}
                   className="w-full bg-primary text-on-primary py-4 rounded-sm font-bold text-xs active:scale-[0.98] transition-all flex items-center justify-center gap-3 uppercase tracking-widest hover:opacity-90"
                 >
-                  <span
-                    className="material-symbols-outlined text-[20px]"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    person_add
-                  </span>
+                  <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>person_add</span>
                   Create New Account
                 </button>
                 <p className="text-center text-[10px] text-on-surface-variant leading-relaxed px-4 font-mono uppercase tracking-widest">
@@ -305,7 +296,7 @@ export default function Gateway() {
               </div>
             )}
 
-            {/* ---- Creating / Resuming ---- */}
+            {/* Creating / Resuming */}
             {(phase === "creating" || phase === "resuming") && (
               <div className="space-y-6 text-center">
                 <div className="flex justify-center">
@@ -314,39 +305,23 @@ export default function Gateway() {
                 <p className="text-on-surface-variant font-mono text-xs uppercase tracking-widest">
                   {statusMessage}
                 </p>
-                {phase === "creating" && (
-                  <p className="text-on-surface-variant/60 text-[10px] font-body italic">
-                    Account deployment can take up to two minutes
-                  </p>
-                )}
               </div>
             )}
 
-            {/* ---- Error ---- */}
+            {/* Error */}
             {phase === "error" && (
-              <div className="space-y-6 text-center">
-                <div className="w-12 h-12 mx-auto flex items-center justify-center bg-red-500/10 rounded-sm border border-red-500/30">
-                  <span className="material-symbols-outlined text-red-400 text-2xl">
-                    error
-                  </span>
+              <div className="space-y-6">
+                <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-sm">
+                  <p className="text-red-400 font-mono text-xs">{errorMessage}</p>
                 </div>
-                <p className="text-red-400 font-mono text-xs">
-                  {errorMessage}
-                </p>
                 <button
-                  onClick={() => window.location.reload()}
-                  className="text-primary font-mono text-xs uppercase tracking-wider hover:underline"
+                  onClick={() => { setErrorMessage(""); setPhase("ready"); }}
+                  className="w-full bg-surface-container text-on-surface py-3 rounded-sm font-bold text-xs transition-all uppercase tracking-widest hover:border-primary/40 border border-outline/30"
                 >
                   Retry
                 </button>
               </div>
             )}
-
-            {/* Footer note */}
-            <p className="text-center text-[11px] text-on-surface-variant leading-relaxed px-6 font-body italic">
-              Your keys are generated locally and stored in your browser.
-              No external wallet required.
-            </p>
           </div>
         </div>
       </div>

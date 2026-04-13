@@ -6,6 +6,9 @@
  *  - get_listing(id) for each listing
  *
  * These are fast (no proof generation) and use .simulate().
+ *
+ * SECTIONS:
+ *   - Component (state, effect, render)
  */
 
 import { useEffect, useState } from "react";
@@ -24,6 +27,7 @@ export default function Browse() {
   const [listings, setListings] = useState<ListingData[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
 
+  // -- fetch listings -------------------------------------------------------
   useEffect(() => {
     if (!wallet || !accountAddress) return;
     let cancelled = false;
@@ -35,7 +39,6 @@ export default function Browse() {
           wallet!,
         );
 
-        // Get the total number of listings
         const nextIdResult = await marketplace.methods
           .get_next_listing_id()
           .simulate({ from: accountAddress! });
@@ -45,7 +48,6 @@ export default function Browse() {
 
         const fetched: ListingData[] = [];
 
-        // Fetch each listing (IDs start at 1)
         for (let id = 1; id < nextId; id++) {
           if (cancelled) return;
 
@@ -54,8 +56,6 @@ export default function Browse() {
             .simulate({ from: accountAddress! });
 
           const r = listingResult.result;
-
-          // Only include active listings
           if (!r.active) continue;
 
           fetched.push({
@@ -87,65 +87,55 @@ export default function Browse() {
     return () => { cancelled = true; };
   }, [wallet, accountAddress]);
 
+  // -- render ---------------------------------------------------------------
+
   return (
     <div className="max-w-[1440px] mx-auto px-8 py-16">
       {/* Hero */}
-      <section className="mb-20">
+      <section className="mb-16">
         <h1 className="font-headline italic text-6xl font-bold tracking-tight mb-6">
-          Explore{" "}
-          <span className="text-primary italic neon-glow">Private Data</span>{" "}
-          Listings
+          Data{" "}
+          <span className="text-primary italic neon-glow">Marketplace</span>
         </h1>
         <p className="text-on-surface-variant max-w-2xl text-lg leading-relaxed font-body italic">
-          Browse verified, zero-knowledge attested health and wellness datasets.
-          Every listing is cryptographically secured on Aztec Network.
+          Browse verified health datasets listed by sellers on Aztec Network.
+          Every listing is backed by cryptographic attestation.
         </p>
       </section>
 
       {/* Loading */}
       {phase === "loading" && (
-        <div className="text-center py-20">
-          <div className="flex justify-center mb-6">
-            <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-          </div>
-          <p className="text-on-surface-variant font-mono text-xs uppercase tracking-widest">
-            Loading listings from marketplace...
+        <div className="flex flex-col items-center gap-6 py-24">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-on-surface-variant font-mono text-xs uppercase tracking-[0.2em]">
+            {wallet ? "Loading listings..." : "Waiting for wallet connection..."}
           </p>
         </div>
       )}
 
       {/* Error */}
       {phase === "error" && (
-        <div className="text-center py-20">
-          <div className="w-12 h-12 mx-auto flex items-center justify-center bg-red-500/10 rounded-sm border border-red-500/30 mb-4">
-            <span className="material-symbols-outlined text-red-400 text-2xl">
-              error
-            </span>
+        <div className="space-y-6">
+          <div className="bg-red-500/10 border border-red-500/30 p-4">
+            <p className="text-red-400 font-mono text-xs">{errorMessage}</p>
           </div>
-          <p className="text-red-400 font-mono text-xs mb-4">{errorMessage}</p>
           <button
             onClick={() => window.location.reload()}
-            className="text-primary font-mono text-xs uppercase tracking-wider hover:underline"
+            className="py-3 px-6 font-mono font-bold text-xs uppercase tracking-[0.2em] bg-surface-container text-on-surface border border-outline/30 hover:border-primary/40 transition-colors"
           >
             Retry
           </button>
         </div>
       )}
 
-      {/* Ready — no listings */}
+      {/* Ready — empty */}
       {phase === "ready" && listings.length === 0 && (
-        <div className="text-center py-20">
-          <span
-            className="material-symbols-outlined text-outline text-6xl mb-6 block"
-            style={{ fontVariationSettings: "'FILL' 0" }}
-          >
+        <div className="flex flex-col items-center gap-6 py-24">
+          <span className="material-symbols-outlined text-outline text-5xl">
             inventory_2
           </span>
-          <h2 className="font-headline italic text-2xl font-bold text-on-surface mb-4">
-            No Listings Yet
-          </h2>
-          <p className="text-on-surface-variant font-body italic mb-8">
-            Be the first to list data on the marketplace.
+          <p className="text-on-surface-variant font-body italic text-lg">
+            No listings yet. Be the first to list your data.
           </p>
           <Link
             to="/create"

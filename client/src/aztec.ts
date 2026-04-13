@@ -234,3 +234,22 @@ async function registerContracts(wallet: EmbeddedWallet): Promise<void> {
     console.error("[aztec] Token registration failed:", (e as Error).message);
   }
 }
+
+/**
+ * Register all given accounts as senders with the PXE.
+ * This enables note discovery between accounts sharing the same PXE.
+ * Must be called after all accounts are created.
+ */
+export async function registerSenders(
+  accounts: AztecAddress[],
+): Promise<void> {
+  const wallet = await getWallet();
+  for (let i = 0; i < accounts.length; i++) {
+    try {
+      await wallet.registerSender(accounts[i], `account-${i}`);
+      console.log(`[aztec] Registered sender: account-${i} (${accounts[i].toString().slice(0, 10)}...)`);
+    } catch (err) {
+      console.warn(`[aztec] registerSender warning for account-${i}:`, (err as Error).message);
+    }
+  }
+}
