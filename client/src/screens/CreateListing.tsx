@@ -161,9 +161,7 @@ export default function CreateListing() {
           <span className="text-primary italic neon-glow">New Listing</span>
         </h1>
         <p className="text-on-surface-variant max-w-2xl text-lg leading-relaxed font-body italic">
-          List your attested health data on the marketplace. The contract
-          verifies your attestor's signature and data properties before
-          publishing.
+          List your data on the marketplace. The contract verifies the attestor signature and data properties before publishing.
         </p>
       </section>
 

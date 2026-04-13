@@ -98,8 +98,7 @@ export default function Browse() {
           <span className="text-primary italic neon-glow">Marketplace</span>
         </h1>
         <p className="text-on-surface-variant max-w-2xl text-lg leading-relaxed font-body italic">
-          Browse verified health datasets listed by sellers on Aztec Network.
-          Every listing is backed by cryptographic attestation.
+          Browse active listings. Each one is backed by a verified attestation from a registered source.
         </p>
       </section>
 

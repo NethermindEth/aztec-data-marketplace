@@ -5,6 +5,7 @@
  * 1. Load listing details
  * 2. Register the buyer as a sender for note discovery
  * 3. Call deliver_and_claim with the original data fields
+ * 4. Call refreshBalances() so header shows updated public balance
  *
  * Buyer address is auto-inferred as the other account in the PXE.
  */
@@ -32,7 +33,7 @@ export default function Deliver() {
   const { listingId } = useParams<{ listingId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { wallet, accountAddress, paymentMethod, accounts, getListingSeller } = useAztec();
+  const { wallet, accountAddress, paymentMethod, accounts, getListingSeller, refreshBalances } = useAztec();
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [listing, setListing] = useState<ListingData | null>(null);
@@ -82,13 +83,15 @@ export default function Deliver() {
             setBuyerAddr(otherAccounts[0].toString());
           }
         }
-         // Pre-fill data fields from listing info
+
+        // Pre-fill data fields from listing info
         const listingInfo = getListingSeller(Number(listingId));
         if (listingInfo) {
           setDataValue(listingInfo.data0);
           setTimestamp(listingInfo.data1);
           setDeviceType(listingInfo.data2);
         }
+
         setPhase("ready");
       } catch (err) {
         if (cancelled) return;
@@ -149,6 +152,8 @@ export default function Deliver() {
         });
 
       console.log("[deliver] Data delivered and payment claimed");
+
+      await refreshBalances();
       setPhase("success");
     } catch (err) {
       console.error("[deliver] Failed:", err);
@@ -199,7 +204,7 @@ export default function Deliver() {
                   </p>
                 </div>
                 <span className="text-2xl font-headline font-bold text-primary italic">
-                  {listing.price.toString()} USDC
+                  {listing.price.toString()} tokens
                 </span>
               </div>
               <div className="font-mono text-[11px] tracking-wide">
@@ -232,12 +237,12 @@ export default function Deliver() {
             {/* Data fields */}
             <div>
               <h3 className="font-headline italic font-bold text-xl mb-6 border-b border-primary/20 pb-2">
-                Original Data (must match listing)
+                Data to Deliver
               </h3>
               <div className="grid grid-cols-3 gap-6">
                 <div>
                   <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant mb-2">
-                    Measurement
+                    Data Value
                   </label>
                   <input
                     type="number"
@@ -269,17 +274,18 @@ export default function Deliver() {
                   />
                 </div>
               </div>
-              <p className="text-on-surface-variant text-[10px] font-body italic mt-2">
-                These must exactly match the data used when creating the listing.
+              <p className="text-on-surface-variant text-[10px] font-body italic mt-3">
+                These must match exactly what was committed at listing time.
+                Pre-filled from listing data.
               </p>
             </div>
 
             {/* Deliver button */}
             <button
               onClick={handleDeliver}
-              disabled={!buyerAddr}
-              className={`w-full py-4 px-4 rounded-sm font-bold text-xs uppercase tracking-widest active:scale-[0.98] transition-all ${
-                buyerAddr
+              disabled={!buyerAddr || !dataValue}
+              className={`w-full py-4 px-4 font-mono font-bold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all rounded-sm ${
+                buyerAddr && dataValue
                   ? "bg-primary text-on-primary hover:opacity-90"
                   : "bg-outline/30 text-on-surface-variant cursor-not-allowed"
               }`}
@@ -289,7 +295,7 @@ export default function Deliver() {
           </div>
         )}
 
-        {/* Registering / Delivering */}
+        {/* Delivering spinner */}
         {(phase === "registering" || phase === "delivering") && (
           <div className="text-center py-20">
             <div className="flex justify-center mb-6">
@@ -305,7 +311,7 @@ export default function Deliver() {
         )}
 
         {/* Success */}
-        {phase === "success" && (
+        {phase === "success" && listing && (
           <div className="text-center py-20">
             <span
               className="material-symbols-outlined text-primary text-6xl mb-6 block"
@@ -317,8 +323,8 @@ export default function Deliver() {
               Data Delivered
             </h2>
             <p className="text-on-surface-variant font-body italic mb-8">
-              The buyer has received a DataNote with the health data.
-              The escrowed tokens have been transferred to your account.
+              The data has been delivered to the buyer and {listing.price.toString()} tokens
+              have been transferred to your public balance.
               The listing is now deactivated.
             </p>
             <button

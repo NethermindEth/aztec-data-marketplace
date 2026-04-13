@@ -1,9 +1,8 @@
 /**
- * Layout shell — header with nav, account switcher, and page outlet.
+ * Layout shell — header with nav, account switcher, balances, and page outlet.
  *
- * Original styling preserved. Added:
- *   - Account switcher dropdown when multiple accounts exist
- *   - Subtle "Connecting..." indicator during auto-reconnect
+ * Shows private and public token balances for the active account.
+ * Balances refresh on account switch and after transactions (via context).
  */
 
 import { useState, useRef, useEffect } from "react";
@@ -15,6 +14,11 @@ function truncateAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+function formatBalance(bal: bigint | null): string {
+  if (bal === null) return "...";
+  return bal.toLocaleString();
+}
+
 export default function Layout() {
   const {
     isConnected,
@@ -24,6 +28,8 @@ export default function Layout() {
     accountAddress,
     switchAccount,
     disconnect,
+    privateBalance,
+    publicBalance,
   } = useAztec();
 
   const location = useLocation();
@@ -70,10 +76,48 @@ export default function Layout() {
               >
                 Create
               </Link>
+              <Link
+                to="/received"
+                className="text-outline hover:text-primary transition-colors font-headline italic"
+              >
+                Received
+              </Link>
             </div>
           )}
 
           <div className="flex items-center gap-4">
+            {/* Balances */}
+            {isConnected && accountAddress && (privateBalance !== null || publicBalance !== null) && (
+              <div className="hidden lg:flex items-center gap-4 mr-2">
+                {privateBalance !== null && (
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="material-symbols-outlined text-primary text-sm"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      lock
+                    </span>
+                    <span className="font-mono text-[10px] text-on-surface-variant">
+                      {formatBalance(privateBalance)}
+                    </span>
+                  </div>
+                )}
+                {publicBalance !== null && (
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="material-symbols-outlined text-primary text-sm"
+                      style={{ fontVariationSettings: "'FILL' 0" }}
+                    >
+                      public
+                    </span>
+                    <span className="font-mono text-[10px] text-on-surface-variant">
+                      {formatBalance(publicBalance)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {isConnected && accountAddress ? (
               <div className="relative" ref={dropdownRef}>
                 <button

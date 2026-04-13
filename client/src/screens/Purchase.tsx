@@ -1,9 +1,11 @@
 /**
  * Purchase screen — buyer locks payment for a listing.
  *
- * Original UI preserved. Functional changes:
- *   - Seller address from context's listingSellers map (not config)
- *   - Success state links to Deliver page
+ * Features:
+ *   - Checks private balance on load; skips mint if sufficient
+ *   - Mints 10,000 tokens so buyer doesn't need to mint again
+ *   - Calls refreshBalances() after mint and purchase (header updates)
+ *   - Seller address from context's listingSellers map
  */
 
 import { useEffect, useState } from "react";
@@ -16,7 +18,6 @@ import { TokenContract } from "@aztec/noir-contracts.js/Token";
 import {
   MARKETPLACE_ADDRESS,
   TOKEN_ADDRESS,
-  ADMIN_ADDRESS,
   ADMIN_SECRET,
   ADMIN_SALT,
   ADMIN_SIGNING_KEY,
@@ -29,6 +30,8 @@ import type { ListingData } from "../components/ListingCard.js";
 
 type Phase = "loading" | "ready" | "minting" | "purchasing" | "success" | "error";
 
+const MINT_AMOUNT = 10_000n;
+
 function label(map: Record<string, string>, key: bigint, fallback: string): string {
   return map[key.toString()] ?? `${fallback} ${key}`;
 }
@@ -36,7 +39,7 @@ function label(map: Record<string, string>, key: bigint, fallback: string): stri
 export default function Purchase() {
   const { listingId } = useParams<{ listingId: string }>();
   const navigate = useNavigate();
-  const { wallet, accountAddress, paymentMethod, getListingSeller } = useAztec();
+  const { wallet, accountAddress, paymentMethod, getListingSeller, privateBalance, refreshBalances } = useAztec();
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [listing, setListing] = useState<ListingData | null>(null);
@@ -46,7 +49,7 @@ export default function Purchase() {
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
-  // Load listing details
+  // Load listing details and check balance
   useEffect(() => {
     if (!wallet || !accountAddress || !listingId) return;
     let cancelled = false;
@@ -61,7 +64,7 @@ export default function Purchase() {
         if (cancelled) return;
 
         const r = result.result;
-        setListing({
+        const listingData: ListingData = {
           id: Number(listingId),
           price: BigInt(r.price),
           category: BigInt(r.category),
@@ -70,11 +73,17 @@ export default function Purchase() {
           valueMax: BigInt(r.value_max),
           attestorId: BigInt(r.attestor_id),
           active: r.active,
-        });
+        };
+        setListing(listingData);
 
         // Look up seller from context
         const info = getListingSeller(Number(listingId));
         setSellerAddr(info?.seller ?? null);
+
+        // Check if balance is sufficient (from context)
+        if (privateBalance !== null && privateBalance >= listingData.price) {
+          setHasMinted(true);
+        }
 
         setPhase("ready");
       } catch (err) {
@@ -87,7 +96,14 @@ export default function Purchase() {
 
     load();
     return () => { cancelled = true; };
-  }, [wallet, accountAddress, listingId, getListingSeller]);
+  }, [wallet, accountAddress, listingId, getListingSeller, privateBalance]);
+
+  // Also update hasMinted if balance changes after load
+  useEffect(() => {
+    if (listing && privateBalance !== null && privateBalance >= listing.price) {
+      setHasMinted(true);
+    }
+  }, [privateBalance, listing]);
 
   // Mint test tokens
   async function handleMint() {
@@ -111,25 +127,25 @@ export default function Purchase() {
         ? AztecAddress.fromString(rawAdminAddr.item.toString())
         : adminAccount.address;
 
-      const mintAmount = listing.price + 1000n;
-
       setStatusMessage("Minting to public balance...");
-      await token.methods.mint_to_public(accountAddress, mintAmount).simulate({ from: adminAddr });
-      await token.methods.mint_to_public(accountAddress, mintAmount).send({
+      await token.methods.mint_to_public(accountAddress, MINT_AMOUNT).simulate({ from: adminAddr });
+      await token.methods.mint_to_public(accountAddress, MINT_AMOUNT).send({
         from: adminAddr,
         fee: { paymentMethod },
         wait: { timeout: 60_000 },
       });
 
       setStatusMessage("Transferring to private balance...");
-      await token.methods.transfer_to_private(accountAddress, mintAmount).simulate({ from: accountAddress });
-      await token.methods.transfer_to_private(accountAddress, mintAmount).send({
+      await token.methods.transfer_to_private(accountAddress, MINT_AMOUNT).simulate({ from: accountAddress });
+      await token.methods.transfer_to_private(accountAddress, MINT_AMOUNT).send({
         from: accountAddress,
         fee: { paymentMethod },
         wait: { timeout: 60_000 },
       });
 
-      console.log("[purchase] Minted and transferred", mintAmount.toString(), "tokens");
+      console.log("[purchase] Minted and transferred", MINT_AMOUNT.toString(), "tokens");
+
+      await refreshBalances();
       setHasMinted(true);
       setPhase("ready");
     } catch (err) {
@@ -183,6 +199,8 @@ export default function Purchase() {
         });
 
       console.log("[purchase] Payment locked successfully");
+
+      await refreshBalances();
       setPhase("success");
     } catch (err) {
       console.error("[purchase] Failed:", err);
@@ -243,7 +261,7 @@ export default function Purchase() {
                   </p>
                 </div>
                 <span className="text-2xl font-headline font-bold text-primary italic">
-                  {listing.price.toString()} USDC
+                  {listing.price.toString()} tokens
                 </span>
               </div>
 
@@ -277,7 +295,7 @@ export default function Purchase() {
               </div>
             </div>
 
-            {/* Mint test tokens */}
+            {/* Mint test tokens — only if balance insufficient */}
             {!hasMinted && phase === "ready" && (
               <div className="bg-surface-container border border-outline/30 p-6">
                 <div className="flex items-center gap-3 mb-3">
@@ -285,38 +303,28 @@ export default function Purchase() {
                     account_balance_wallet
                   </span>
                   <span className="font-mono text-xs text-on-surface uppercase tracking-wider font-bold">
-                    Test Tokens Required
+                    Insufficient Balance
                   </span>
                 </div>
                 <p className="text-on-surface-variant text-xs font-body italic mb-4">
-                  You need tokens in your private balance to purchase. Click below
-                  to mint test tokens (MVP only).
+                  You need at least {listing.price.toString()} tokens to purchase.
+                  {privateBalance !== null && privateBalance > 0n
+                    ? ` Current balance: ${privateBalance.toLocaleString()}.`
+                    : ""
+                  }
+                  {" "}Click below to mint test tokens (demo only).
                 </p>
                 <button
                   onClick={handleMint}
                   className="w-full py-3 px-4 font-mono font-bold text-xs uppercase tracking-[0.2em] bg-surface text-on-surface border border-outline/30 hover:border-primary/40 transition-colors"
                 >
-                  Mint Test Tokens
+                  Mint {MINT_AMOUNT.toLocaleString()} Test Tokens
                 </button>
               </div>
             )}
 
-            {hasMinted && phase === "ready" && (
-              <div className="bg-primary/10 border border-primary/20 p-4 flex items-center gap-3">
-                <span
-                  className="material-symbols-outlined text-primary"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  check_circle
-                </span>
-                <span className="font-mono text-xs text-primary uppercase tracking-wider">
-                  Tokens minted and ready
-                </span>
-              </div>
-            )}
-
             {/* Deadline */}
-            {phase === "ready" && (
+            {phase === "ready" && hasMinted && (
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant mb-2">
                   Deadline (blocks from now, minimum 100)
@@ -346,7 +354,7 @@ export default function Purchase() {
                     : "bg-outline/30 text-on-surface-variant cursor-not-allowed"
                 }`}
               >
-                Lock Payment and Purchase
+                Lock Payment ({listing.price.toString()} tokens)
               </button>
             )}
 
@@ -368,7 +376,7 @@ export default function Purchase() {
         )}
 
         {/* Success */}
-        {phase === "success" && (
+        {phase === "success" && listing && (
           <div className="text-center py-20">
             <span
               className="material-symbols-outlined text-primary text-6xl mb-6 block"
@@ -380,8 +388,9 @@ export default function Purchase() {
               Payment Locked
             </h2>
             <p className="text-on-surface-variant font-body italic mb-8">
-              Switch to the seller account using the header dropdown, then
-              deliver the data to complete the transaction.
+              {listing.price.toString()} tokens locked in escrow. The seller will
+              deliver the data and claim payment. If they don't deliver before
+              the deadline, you can reclaim your tokens.
             </p>
             <div className="flex justify-center gap-4">
               <button

@@ -7,6 +7,9 @@
  * Also maintains a listing-to-seller map so the buyer knows which
  * address to pass to lock_payment.
  *
+ * Balances: tracks private and public token balances for the active
+ * account. Screens call refreshBalances() after transactions.
+ *
  * Auto-reconnects on mount from IndexedDB (background, non-blocking).
  */
 
@@ -66,6 +69,11 @@ interface AztecState {
   listingSellers: ListingSellerMap;
   setListingSeller: (listingId: number, info: ListingInfo) => void;
   getListingSeller: (listingId: number) => ListingInfo | null;
+
+  // Balances
+  privateBalance: bigint | null;
+  publicBalance: bigint | null;
+  refreshBalances: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +121,8 @@ export function AztecProvider({ children }: { children: ReactNode }) {
     useState<SponsoredFeePaymentMethod | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(true);
   const [listingSellers, setListingSellers] = useState<ListingSellerMap>(loadListingSellers);
+  const [privateBalance, setPrivateBalance] = useState<bigint | null>(null);
+  const [publicBalance, setPublicBalance] = useState<bigint | null>(null);
 
   // -- addAccount -----------------------------------------------------------
   const addAccount = useCallback(
@@ -137,6 +147,9 @@ export function AztecProvider({ children }: { children: ReactNode }) {
     (index: number) => {
       setActiveIndex(index);
       saveActiveIndex(index);
+      // Clear balances — they'll be refreshed for the new account
+      setPrivateBalance(null);
+      setPublicBalance(null);
     },
     [],
   );
@@ -148,6 +161,8 @@ export function AztecProvider({ children }: { children: ReactNode }) {
     setPaymentMethod(null);
     setActiveIndex(0);
     saveActiveIndex(0);
+    setPrivateBalance(null);
+    setPublicBalance(null);
   }, []);
 
   // -- listing seller map ---------------------------------------------------
@@ -168,6 +183,52 @@ export function AztecProvider({ children }: { children: ReactNode }) {
     },
     [listingSellers],
   );
+
+  // -- balance fetching -----------------------------------------------------
+  const refreshBalances = useCallback(async () => {
+    if (!wallet || accounts.length === 0) return;
+
+    const activeAccount = accounts[activeIndex] ?? null;
+    if (!activeAccount) return;
+
+    try {
+      // Dynamic import to avoid circular dependency with aztec.ts
+      const { TOKEN_ADDRESS } = await import("./config.js");
+      const { TokenContract } = await import("@aztec/noir-contracts.js/Token");
+
+      const tokenAddr = TOKEN_ADDRESS();
+      const token = TokenContract.at(tokenAddr, wallet);
+
+      // Fetch both balances in parallel
+      const [privResult, pubResult] = await Promise.allSettled([
+        token.methods.balance_of_private(activeAccount).simulate({ from: activeAccount }),
+        token.methods.balance_of_public(activeAccount).simulate({ from: activeAccount }),
+      ]);
+
+      if (privResult.status === "fulfilled") {
+        setPrivateBalance(BigInt(privResult.value.result));
+      } else {
+        console.warn("[context] Could not fetch private balance:", privResult.reason);
+        setPrivateBalance(0n);
+      }
+
+      if (pubResult.status === "fulfilled") {
+        setPublicBalance(BigInt(pubResult.value.result));
+      } else {
+        console.warn("[context] Could not fetch public balance:", pubResult.reason);
+        setPublicBalance(0n);
+      }
+    } catch (err) {
+      console.warn("[context] Balance refresh failed:", err);
+    }
+  }, [wallet, accounts, activeIndex]);
+
+  // Refresh balances when active account changes
+  useEffect(() => {
+    if (wallet && accounts.length > 0) {
+      refreshBalances();
+    }
+  }, [wallet, accounts, activeIndex, refreshBalances]);
 
   // -- auto-reconnect on mount (background, non-blocking) -------------------
   useEffect(() => {
@@ -236,6 +297,9 @@ export function AztecProvider({ children }: { children: ReactNode }) {
         listingSellers,
         setListingSeller,
         getListingSeller,
+        privateBalance,
+        publicBalance,
+        refreshBalances,
       }}
     >
       {children}

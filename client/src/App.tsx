@@ -5,6 +5,7 @@ import Browse from "./screens/Browse.js";
 import CreateListing from "./screens/CreateListing.js";
 import Purchase from "./screens/Purchase.js";
 import Deliver from "./screens/Deliver.js";
+import ReceivedData from "./screens/ReceivedData.js";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/create" element={<CreateListing />} />
         <Route path="/purchase/:listingId" element={<Purchase />} />
         <Route path="/deliver/:listingId" element={<Deliver />} />
+        <Route path="/received" element={<ReceivedData />} />
       </Route>
     </Routes>
   );

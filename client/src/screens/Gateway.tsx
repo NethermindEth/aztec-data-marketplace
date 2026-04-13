@@ -124,7 +124,7 @@ export default function Gateway() {
         <div className="flex flex-col space-y-10">
           <div>
             <span className="text-primary font-mono text-[11px] font-medium tracking-[0.3em] uppercase mb-6 block">
-              AZTEC NETWORK // SECURE
+              AZTEC NETWORK
             </span>
             <h1 className="text-7xl font-headline italic font-bold text-on-surface leading-[1.05] tracking-tight">
               The Private <br />
@@ -135,7 +135,7 @@ export default function Gateway() {
           </div>
 
           <p className="text-on-surface-variant text-xl max-w-md leading-relaxed font-body">
-            Sell your health data with zero-knowledge privacy guarantees.
+            Your data. Your price. Zero exposure.
           </p>
 
           <div className="grid grid-cols-2 gap-8 pt-6">
@@ -144,13 +144,13 @@ export default function Gateway() {
                 className="material-symbols-outlined text-primary text-4xl mb-4 group-hover:scale-110 transition-transform block"
                 style={{ fontVariationSettings: "'FILL' 0" }}
               >
-                shield_lock
+                visibility_off
               </span>
               <h3 className="text-on-surface font-headline italic font-bold text-lg mb-2">
-                Encrypted Flows
+                Private by Default
               </h3>
               <p className="text-on-surface-variant text-sm font-body leading-relaxed">
-                Your data remains hidden, even during active trade.
+                Seller identity, buyer identity, and data content are hidden on-chain. Only listing metadata is public.
               </p>
             </div>
             <div className="p-8 rounded-sm bg-surface border border-outline/30 hover:border-primary/40 transition-colors group">
@@ -158,13 +158,13 @@ export default function Gateway() {
                 className="material-symbols-outlined text-primary text-4xl mb-4 group-hover:scale-110 transition-transform block"
                 style={{ fontVariationSettings: "'FILL' 0" }}
               >
-                visibility_off
+                shield_lock
               </span>
               <h3 className="text-on-surface font-headline italic font-bold text-lg mb-2">
-                Total Anonymity
+                Verified Provenance
               </h3>
               <p className="text-on-surface-variant text-sm font-body leading-relaxed">
-                Zero-knowledge proofs verify without disclosure.
+                Every listing is cryptographically proven to come from a trusted source. No fabricated data enters the marketplace
               </p>
             </div>
           </div>
@@ -173,15 +173,6 @@ export default function Gateway() {
         {/* Connection panel — glass-panel style */}
         <div className="glass-panel p-1 w-full max-w-md mx-auto rounded-lg shadow-[0_40px_80px_-15px_rgba(0,0,0,0.6)]">
           <div className="bg-surface rounded-md p-10 space-y-10">
-            <div className="text-center">
-              <h2 className="text-3xl font-headline italic font-bold text-on-surface">
-                Secure Gateway
-              </h2>
-              <p className="text-on-surface-variant text-sm mt-3 font-body italic">
-                Access your private Aztec account
-              </p>
-            </div>
-
             {/* Waiting / Initialising */}
             {(phase === "waiting" || phase === "initialising") && (
               <div className="space-y-6 text-center">
@@ -290,9 +281,6 @@ export default function Gateway() {
                   <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>person_add</span>
                   Create New Account
                 </button>
-                <p className="text-center text-[10px] text-on-surface-variant leading-relaxed px-4 font-mono uppercase tracking-widest">
-                  Built-in browser security via IndexedDB
-                </p>
               </div>
             )}
 
