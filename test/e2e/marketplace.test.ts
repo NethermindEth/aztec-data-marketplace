@@ -39,9 +39,11 @@ const PRICE_4 = new Fr(400n);
 const PRICE_5 = new Fr(500n);
 
 // Property proof parameters
-const VALUE_MIN = new Fr(40n);
-const VALUE_MAX = new Fr(200n);
+const MEASUREMENT_MIN = new Fr(40n);
+const MEASUREMENT_MAX = new Fr(200n);
 const DEVICE_ID = new Fr(1n);
+
+const NAME = new Fr(0n); // placeholder for tests; contract treats it as opaque public metadata
 
 // Attestor type
 const ATTESTOR_TYPE_APP_ATTEST = new Fr(1n);
@@ -303,15 +305,15 @@ describe("Data Marketplace E2E", () => {
     await marketplace.methods.create_listing(
       DATA_0, DATA_1, DATA_2, DATA_3,
       PRICE, token.address, CATEGORY,
-      VALUE_MIN, VALUE_MAX, DEVICE_ID,
-      attestorId, registry.address,
+      MEASUREMENT_MIN, MEASUREMENT_MAX, DEVICE_ID,
+      NAME, attestorId, registry.address,
       sigFields, pkXFields, pkYFields,
     ).simulate({ from: sellerAccount.address });
     await marketplace.methods.create_listing(
       DATA_0, DATA_1, DATA_2, DATA_3,
       PRICE, token.address, CATEGORY,
-      VALUE_MIN, VALUE_MAX, DEVICE_ID,
-      attestorId, registry.address,
+      MEASUREMENT_MIN, MEASUREMENT_MAX, DEVICE_ID, 
+      NAME, attestorId, registry.address,
       sigFields, pkXFields, pkYFields,
     ).send({
       from: sellerAccount.address,
@@ -323,8 +325,8 @@ describe("Data Marketplace E2E", () => {
     const listing = await marketplace.methods.get_listing(listingId).simulate({ from: sellerAccount.address });
     expect(listing.result.active).toBe(true);
     expect(BigInt(listing.result.attestor_id)).toBe(1n);
-    expect(BigInt(listing.result.value_min)).toBe(40n);
-    expect(BigInt(listing.result.value_max)).toBe(200n);
+    expect(BigInt(listing.result.measurement_min)).toBe(40n);
+    expect(BigInt(listing.result.measurement_max)).toBe(200n);
     expect(BigInt(listing.result.device_id)).toBe(1n);
 
     // Lock payment
@@ -367,14 +369,14 @@ describe("Data Marketplace E2E", () => {
     await marketplace.methods.create_listing(
       DATA_0, DATA_1, DATA_2, DATA_3,
       PRICE_2, token.address, CATEGORY,
-      VALUE_MIN, VALUE_MAX, DEVICE_ID,
+      MEASUREMENT_MIN, MEASUREMENT_MAX, DEVICE_ID, NAME,
       attestorId, registry.address,
       sigFields, pkXFields, pkYFields,
     ).simulate({ from: sellerAccount.address });
     await marketplace.methods.create_listing(
       DATA_0, DATA_1, DATA_2, DATA_3,
       PRICE_2, token.address, CATEGORY,
-      VALUE_MIN, VALUE_MAX, DEVICE_ID,
+      MEASUREMENT_MIN, MEASUREMENT_MAX, DEVICE_ID, NAME,
       attestorId, registry.address,
       sigFields, pkXFields, pkYFields,
     ).send({
@@ -419,7 +421,7 @@ describe("Data Marketplace E2E", () => {
       marketplace.methods.create_listing(
         DATA_0, DATA_1, DATA_2, DATA_3,
         PRICE_3, token.address, CATEGORY,
-        VALUE_MIN, VALUE_MAX, DEVICE_ID,
+        MEASUREMENT_MIN, MEASUREMENT_MAX, DEVICE_ID,
         invalidAttestorId, registry.address,
         sigFields, pkXFields, pkYFields,
       ).send({
@@ -441,7 +443,7 @@ describe("Data Marketplace E2E", () => {
       marketplace.methods.create_listing(
         BAD_DATA_0, DATA_1, DATA_2, DATA_3,
         PRICE_4, token.address, CATEGORY,
-        VALUE_MIN, VALUE_MAX, DEVICE_ID,
+        MEASUREMENT_MIN, MEASUREMENT_MAX, DEVICE_ID,
         attestorId, registry.address,
         sigFields, pkXFields, pkYFields,
       ).simulate({ from: sellerAccount.address })
@@ -461,7 +463,7 @@ describe("Data Marketplace E2E", () => {
       marketplace.methods.create_listing(
         DATA_0, DATA_1, DATA_2, DATA_3,
         PRICE_5, token.address, CATEGORY,
-        VALUE_MIN, VALUE_MAX, wrongDeviceId,
+        MEASUREMENT_MIN, MEASUREMENT_MAX, wrongDeviceId,
         attestorId, registry.address,
         sigFields, pkXFields, pkYFields,
       ).simulate({ from: sellerAccount.address })

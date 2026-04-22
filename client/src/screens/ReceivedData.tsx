@@ -22,6 +22,7 @@ import { Link } from "react-router-dom";
 import { useAztec } from "../context.js";
 import { Fr } from "@aztec/aztec.js/fields";
 import { MarketplaceContract } from "../../../test/artifacts/Marketplace.js";
+import { fieldToName } from "../lib/nameEncoding.js";
 import {
   MARKETPLACE_ADDRESS,
   CATEGORY_LABELS,
@@ -31,6 +32,7 @@ import {
 
 interface ReceivedItem {
   listingId: number;
+  name: string;
   data0: string;
   data1: string;
   data2: string;
@@ -112,6 +114,7 @@ export default function ReceivedData() {
             if (!r.active) {
               received.push({
                 listingId,
+                name: fieldToName(BigInt(r.name)),
                 data0: info.data0,
                 data1: info.data1,
                 data2: info.data2,
@@ -119,8 +122,8 @@ export default function ReceivedData() {
                 price: BigInt(r.price),
                 category: BigInt(r.category),
                 deviceId: BigInt(r.device_id),
-                valueMin: BigInt(r.value_min),
-                valueMax: BigInt(r.value_max),
+                valueMin: BigInt(r.measurement_min),
+                valueMax: BigInt(r.measurement_max),
                 attestorId: BigInt(r.attestor_id),
               });
             }
@@ -249,10 +252,10 @@ export default function ReceivedData() {
                   </span>
                   <div>
                     <span className="text-primary font-headline italic text-lg font-bold">
-                      {label(CATEGORY_LABELS, item.category, "Category")}
+                      {item.name || label(CATEGORY_LABELS, item.category, "Category")}
                     </span>
                     <span className="text-on-surface-variant font-mono text-[10px] ml-3 uppercase tracking-wider">
-                      Listing #{item.listingId}
+                      Listing #{item.listingId} · {label(CATEGORY_LABELS, item.category, "Category")}
                     </span>
                   </div>
                 </div>

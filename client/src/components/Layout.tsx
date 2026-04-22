@@ -59,7 +59,7 @@ export default function Layout() {
             to="/"
             className="text-2xl font-headline italic text-primary tracking-tight"
           >
-            AZTEC MARKET
+            AZTEC Data Marketplace
           </Link>
 
           {isConnected && (

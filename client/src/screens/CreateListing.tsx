@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { useAztec } from "../context.js";
 import { Fr } from "@aztec/aztec.js/fields";
 import { MarketplaceContract } from "../../../test/artifacts/Marketplace.js";
+import { nameToField } from "../lib/nameEncoding.js";
 import {
   MARKETPLACE_ADDRESS,
   REGISTRY_ADDRESS,
@@ -42,8 +43,9 @@ export default function CreateListing() {
   const [deviceType, setDeviceType] = useState("1");
   const [price, setPrice] = useState("100");
   const [category, setCategory] = useState("1");
-  const [valueMin, setValueMin] = useState("40");
-  const [valueMax, setValueMax] = useState("200");
+  const [measurementMin, setMeasurementMin] = useState("40");
+  const [measurementMax, setMeasurementMax] = useState("200");
+  const [name, setName] = useState("");
 
   const [phase, setPhase] = useState<Phase>("form");
   const [statusMessage, setStatusMessage] = useState("");
@@ -67,9 +69,10 @@ export default function CreateListing() {
 
       const priceField = new Fr(BigInt(price));
       const categoryField = new Fr(BigInt(category));
-      const valueMinField = new Fr(BigInt(valueMin));
-      const valueMaxField = new Fr(BigInt(valueMax));
+      const measurementMinField = new Fr(BigInt(measurementMin));
+      const measurementMaxField = new Fr(BigInt(measurementMax));
       const deviceIdField = new Fr(BigInt(deviceType));
+      const nameField = nameToField(name);
 
       setStatusMessage("Computing content hash...");
       const contentHash = await computeContentHash(d0, d1, d2, d3);
@@ -99,8 +102,8 @@ export default function CreateListing() {
         .create_listing(
           d0, d1, d2, d3,
           priceField, tokenAddress, categoryField,
-          valueMinField, valueMaxField, deviceIdField,
-          attestorId, registryAddress,
+          measurementMinField, measurementMaxField, deviceIdField,
+          nameField, attestorId, registryAddress,
           sigFields, pkXFields, pkYFields,
         )
         .simulate({ from: accountAddress });
@@ -111,8 +114,8 @@ export default function CreateListing() {
         .create_listing(
           d0, d1, d2, d3,
           priceField, tokenAddress, categoryField,
-          valueMinField, valueMaxField, deviceIdField,
-          attestorId, registryAddress,
+          measurementMinField, measurementMaxField, deviceIdField,
+          nameField, attestorId, registryAddress,
           sigFields, pkXFields, pkYFields,
         )
         .send({
@@ -169,6 +172,24 @@ export default function CreateListing() {
         {/* Form */}
         {phase === "form" && (
           <div className="space-y-10">
+            {/* Listing name */}
+            <div>
+              <h3 className="font-headline italic font-bold text-xl mb-6 border-b border-primary/20 pb-2">
+                Listing Name
+              </h3>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={31}
+                placeholder="e.g. Resting HR - Apple Watch 7d"
+                className="w-full bg-surface-container border border-outline/30 text-on-surface px-4 py-3 font-mono text-sm focus:border-primary/50 focus:outline-none"
+              />
+              <p className="text-on-surface-variant/60 text-[10px] font-body italic mt-2">
+                Public label. Up to 31 characters. Not part of the content hash.
+              </p>
+            </div>
+
             {/* Data fields */}
             <div>
               <h3 className="font-headline italic font-bold text-xl mb-6 border-b border-primary/20 pb-2">
@@ -248,23 +269,23 @@ export default function CreateListing() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant mb-2">
-                    Value Min
+                    Measurement Min
                   </label>
                   <input
                     type="number"
-                    value={valueMin}
-                    onChange={(e) => setValueMin(e.target.value)}
+                    value={measurementMin}
+                    onChange={(e) => setMeasurementMin(e.target.value)}
                     className="w-full bg-surface-container border border-outline/30 text-on-surface px-4 py-3 font-mono text-sm focus:border-primary/50 focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant mb-2">
-                    Value Max
+                    Measurement Max
                   </label>
                   <input
                     type="number"
-                    value={valueMax}
-                    onChange={(e) => setValueMax(e.target.value)}
+                    value={measurementMax}
+                    onChange={(e) => setMeasurementMax(e.target.value)}
                     className="w-full bg-surface-container border border-outline/30 text-on-surface px-4 py-3 font-mono text-sm focus:border-primary/50 focus:outline-none"
                   />
                 </div>

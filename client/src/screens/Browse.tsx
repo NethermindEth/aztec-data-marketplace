@@ -18,6 +18,7 @@ import { MARKETPLACE_ADDRESS } from "../config.js";
 import { Fr } from "@aztec/aztec.js/fields";
 import { MarketplaceContract } from "../../../test/artifacts/Marketplace.js";
 import ListingCard, { type ListingData } from "../components/ListingCard.js";
+import { fieldToName } from "../lib/nameEncoding.js";
 
 type Phase = "loading" | "ready" | "error";
 
@@ -60,11 +61,12 @@ export default function Browse() {
 
           fetched.push({
             id,
+            name: fieldToName(BigInt(r.name)),
             price: BigInt(r.price),
             category: BigInt(r.category),
             deviceId: BigInt(r.device_id),
-            valueMin: BigInt(r.value_min),
-            valueMax: BigInt(r.value_max),
+            valueMin: BigInt(r.measurement_min),
+            valueMax: BigInt(r.measurement_max),
             attestorId: BigInt(r.attestor_id),
             active: r.active,
           });

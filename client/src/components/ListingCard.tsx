@@ -7,6 +7,7 @@ import {
 
 export interface ListingData {
   id: number;
+  name: string;
   price: bigint;
   category: bigint;
   deviceId: bigint;
@@ -24,23 +25,29 @@ export default function ListingCard({ listing }: { listing: ListingData }) {
   const category = label(CATEGORY_LABELS, listing.category, "Category");
   const device = label(DEVICE_LABELS, listing.deviceId, "Device");
   const attestor = label(ATTESTOR_LABELS, listing.attestorId, "Attestor");
+  const displayName = listing.name || `Listing #${listing.id}`;
 
   return (
     <div className="bg-surface p-8 border border-outline/30 hover:border-primary/50 transition-all duration-500 group">
       {/* Header */}
       <div className="flex justify-between items-start mb-8">
-        <div className="flex flex-col gap-2">
-          <span className="text-primary font-headline italic text-2xl font-bold">
-            {category}
+        <div className="flex flex-col gap-3 min-w-0 pr-4">
+          <span className="text-primary font-headline italic text-2xl font-bold truncate">
+            {displayName}
           </span>
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            <span className="text-[9px] font-mono text-primary uppercase tracking-[0.2em]">
-              Active
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-[0.15em] border border-primary/20">
+              {category}
             </span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="text-[9px] font-mono text-primary uppercase tracking-[0.2em]">
+                Active
+              </span>
+            </div>
           </div>
         </div>
-        <div className="text-right">
+        <div className="text-right shrink-0">
           <span className="block text-2xl font-headline font-bold text-primary italic">
             {listing.price.toString()} USDC
           </span>
@@ -60,7 +67,7 @@ export default function ListingCard({ listing }: { listing: ListingData }) {
           </span>
         </div>
         <div className="flex items-center justify-between py-2 border-b border-outline/10">
-          <span className="text-on-surface-variant uppercase">Verified Value Range</span>
+          <span className="text-on-surface-variant uppercase">Verified Measurement Range</span>
           <span className="text-on-surface font-bold">
             {listing.valueMin.toString()} - {listing.valueMax.toString()}
           </span>

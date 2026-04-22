@@ -15,6 +15,7 @@ import { Fr } from "@aztec/aztec.js/fields";
 import { AztecAddress } from "@aztec/aztec.js/addresses";
 import { MarketplaceContract } from "../../../test/artifacts/Marketplace.js";
 import { TokenContract } from "@aztec/noir-contracts.js/Token";
+import { fieldToName } from "../lib/nameEncoding.js";
 import {
   MARKETPLACE_ADDRESS,
   TOKEN_ADDRESS,
@@ -66,11 +67,12 @@ export default function Purchase() {
         const r = result.result;
         const listingData: ListingData = {
           id: Number(listingId),
+          name: fieldToName(BigInt(r.name)),
           price: BigInt(r.price),
           category: BigInt(r.category),
           deviceId: BigInt(r.device_id),
-          valueMin: BigInt(r.value_min),
-          valueMax: BigInt(r.value_max),
+          valueMin: BigInt(r.measurement_min),
+          valueMax: BigInt(r.measurement_max),
           attestorId: BigInt(r.attestor_id),
           active: r.active,
         };
@@ -254,10 +256,10 @@ export default function Purchase() {
               <div className="flex justify-between items-start mb-8">
                 <div>
                   <span className="text-primary font-headline italic text-2xl font-bold">
-                    {label(CATEGORY_LABELS, listing.category, "Category")}
+                    {listing.name || label(CATEGORY_LABELS, listing.category, "Category")}
                   </span>
                   <p className="text-on-surface-variant font-mono text-xs mt-1">
-                    Listing #{listing.id}
+                    Listing #{listing.id} · {label(CATEGORY_LABELS, listing.category, "Category")}
                   </p>
                 </div>
                 <span className="text-2xl font-headline font-bold text-primary italic">

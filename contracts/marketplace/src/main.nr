@@ -42,9 +42,10 @@ pub contract Marketplace {
         token: AztecAddress,
         category: Field,
         attestor_id: Field,
-        value_min: Field,
-        value_max: Field,
+        measurement_min: Field,
+        measurement_max: Field,
         device_id: Field,
+        name: Field,
         active: bool,
     }
 
@@ -82,9 +83,10 @@ pub contract Marketplace {
         price: Field,
         token: AztecAddress,
         category: Field,
-        value_min: Field,
-        value_max: Field,
+        measurement_min: Field,
+        measurement_max: Field,
         device_id: Field,
+        name: Field,
         attestor_id: Field,
         registry_address: AztecAddress,
         signature: [Field; 64],
@@ -97,7 +99,7 @@ pub contract Marketplace {
 
         _verify_attestation(content_hash, signature, pub_key_x, pub_key_y);
 
-        _verify_data_properties(data_0, data_2, value_min, value_max, device_id);
+        _verify_data_properties(data_0, data_2, measurement_min, measurement_max, device_id);
 
         let key_hash = _compute_key_hash(pub_key_x, pub_key_y);
 
@@ -115,7 +117,7 @@ pub contract Marketplace {
 
         self.enqueue_self._register_listing(
             content_hash, price, token, category, attestor_id,
-            value_min, value_max, device_id, registry_address
+            measurement_min, measurement_max, device_id, name, registry_address
         );
     }
 
@@ -194,19 +196,18 @@ pub contract Marketplace {
     fn _verify_data_properties(
         data_0: Field,
         data_2: Field,
-        value_min: Field,
-        value_max: Field,
+        measurement_min: Field,
+        measurement_max: Field,
         device_id: Field,
     ) {
-        assert(value_min as u64 <= data_0 as u64, "data_0 is below value_min");
-        assert(data_0 as u64 <= value_max as u64, "data_0 is above value_max");
+        assert(measurement_min as u64 <= data_0 as u64, "data_0 is below measurement_min");
+        assert(data_0 as u64 <= measurement_max as u64, "data_0 is above measurement_max");
         assert(data_2 == device_id, "data_2 does not match claimed device_id");
     }
 
     // ---------------------------------------------------------------
     // Register Listing (public, self-only)
     // ---------------------------------------------------------------
-
     #[external("public")]
     #[only_self]
     fn _register_listing(
@@ -215,9 +216,10 @@ pub contract Marketplace {
         token: AztecAddress,
         category: Field,
         attestor_id: Field,
-        value_min: Field,
-        value_max: Field,
+        measurement_min: Field,
+        measurement_max: Field,
         device_id: Field,
+        name: Field,
         registry_address: AztecAddress,
     ) {
         let stored_registry = self.storage.registry.read();
@@ -235,9 +237,10 @@ pub contract Marketplace {
             token,
             category,
             attestor_id,
-            value_min,
-            value_max,
+            measurement_min,
+            measurement_max,
             device_id,
+            name,
             active: true,
         };
         self.storage.listings.at(listing_id).write(entry);
