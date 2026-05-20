@@ -1,3 +1,7 @@
 target/
 node_modules/
 client/.vite/
+
+# C2D-specific
+**/store/
+**/codegenCache.json
