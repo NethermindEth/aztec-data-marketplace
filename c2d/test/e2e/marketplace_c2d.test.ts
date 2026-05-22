@@ -335,4 +335,125 @@ describe("MarketplaceC2D E2E", () => {
     expect(BigInt(sellerBalance.result)).toBe(PRICE.toBigInt());
     logger.info(`Seller received ${sellerBalance.result} tokens`);
   }, 900_000);
+
+  // -----------------------------------------------------------------
+  // Negative tests
+  // -----------------------------------------------------------------
+  //
+  // Each negative test creates its own listing so it doesn't collide with
+  // notes consumed by the happy path. The pattern is:
+  //   1. Seller creates listing.
+  //   2. Buyer locks payment (real send, because the assertion under test
+  //      reads the escrow).
+  //   3. Delivery is attempted with bad inputs; simulate() should throw.
+
+  async function createListingAndLock(
+    h_d: Fr,
+    price: Fr,
+  ): Promise<{ listingId: Fr; deadline: Fr }> {
+    const listingIdBefore = await marketplace.methods
+      .get_next_listing_id()
+      .simulate({ from: sellerAccount.address });
+    const listingId = new Fr(BigInt(listingIdBefore.result));
+
+    await marketplace.methods
+      .create_listing(h_d, price, token.address)
+      .send({
+        from: sellerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      });
+
+    const deadline = new Fr(1200n);
+    const lockAction = token.methods.transfer_to_public(
+      buyerAccount.address,
+      marketplace.address,
+      price.toBigInt(),
+      0,
+    );
+    const authWit = await wallet.createAuthWit(buyerAccount.address, {
+      caller: marketplace.address,
+      action: lockAction,
+    });
+
+    await marketplace.methods
+      .lock_payment(
+        listingId,
+        sellerAccount.address,
+        price,
+        token.address,
+        deadline,
+      )
+      .with({ authWitnesses: [authWit] })
+      .send({
+        from: buyerAccount.address,
+        fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: TX_TIMEOUT },
+      });
+
+    return { listingId, deadline };
+  }
+
+  it("rejects delivery when seller claims a wrong result_value", async () => {
+    // Use a unique price per negative test to avoid auth-witness
+    // nullifier collisions on the shared local network.
+    const { listingId } = await createListingAndLock(fixtures.h_d, new Fr(101n));
+
+    // Same proof, but the seller claims result_value = 50 instead of 67.
+    // The contract's assert(public_inputs[2] == result_value) catches it.
+    const wrongResult = new Fr(50n);
+    await expect(
+      marketplace.methods
+        .deliver_query_result(
+          listingId,
+          buyerAccount.address,
+          fixtures.h_d,
+          wrongResult,
+          fixtures.vkFields,
+          fixtures.proofFields,
+          fixtures.publicInputsFields,
+        )
+        .simulate({ from: sellerAccount.address }),
+    ).rejects.toThrow();
+
+    logger.info("Wrong result_value correctly rejected");
+  }, 300_000);
+
+  it("rejects delivery when proof H(D) does not match listing", async () => {
+    // Seller creates a listing with a junk h_d, then tries to deliver the
+    // real proof against it. The contract's assert(public_inputs[0] == h_d)
+    // catches the mismatch.
+    const junkHd = new Fr(0x1234n);
+    const { listingId } = await createListingAndLock(junkHd, new Fr(102n));
+
+    await expect(
+      marketplace.methods
+        .deliver_query_result(
+          listingId,
+          buyerAccount.address,
+          junkHd,
+          fixtures.result_value,
+          fixtures.vkFields,
+          fixtures.proofFields,
+          fixtures.publicInputsFields,
+        )
+        .simulate({ from: sellerAccount.address }),
+    ).rejects.toThrow();
+
+    logger.info("Mismatched H(D) correctly rejected");
+  }, 300_000);
+
+  it("rejects refund before deadline has passed", async () => {
+    // Buyer locks payment with a deadline far in the future, then
+    // immediately tries to refund. _check_deadline_passed should reject.
+    const { listingId } = await createListingAndLock(fixtures.h_d, new Fr(103n));
+
+    await expect(
+      marketplace.methods
+        .refund(listingId, sellerAccount.address)
+        .simulate({ from: buyerAccount.address }),
+    ).rejects.toThrow();
+
+    logger.info("Early refund correctly rejected");
+  }, 300_000);
 });
