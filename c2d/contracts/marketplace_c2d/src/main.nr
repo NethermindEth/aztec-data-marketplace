@@ -173,7 +173,7 @@ pub contract MarketplaceC2D {
 
         self.storage.escrows.at(seller)
             .insert(escrow)
-            .deliver(MessageDelivery.ONCHAIN_UNCONSTRAINED);
+            .deliver(MessageDelivery.ONCHAIN_CONSTRAINED);
     }
 
     #[external("public")]
@@ -263,7 +263,7 @@ pub contract MarketplaceC2D {
         };
         self.storage.results.at(buyer)
             .insert(result_note)
-            .deliver(MessageDelivery.ONCHAIN_UNCONSTRAINED);
+            .deliver(MessageDelivery.ONCHAIN_CONSTRAINED);
 
         // 6. Release the escrowed payment to the seller.
         self.enqueue(Token::at(escrow.token).transfer_in_public(
