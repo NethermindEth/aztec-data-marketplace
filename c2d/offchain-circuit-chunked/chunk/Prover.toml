@@ -1,0 +1,4 @@
+readings = ["84", "85", "86", "87", "88", "89", "90", "91"]
+chunk_index = "3"
+subtree_root = "0x20e0f3018c4575d8ce6e63f1bb57c90d616b5ecb10bef70333b700f3a6b28161"
+partial_sum = "700"
